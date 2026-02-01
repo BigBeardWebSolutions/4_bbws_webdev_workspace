@@ -1,0 +1,21 @@
+# Claude Code workflow files (local only)
+.claude/
+
+# macOS
+.DS_Store
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# IDE
+.idea/
+.vscode/
+
+# Credentials (never commit)
+*.pem
+*.key
+credentials.json
+.env

@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ECSFullAccess",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-1"
+        }
+      }
+    },
+    {
+      "Sid": "ECSServiceLinkedRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateServiceLinkedRole"
+      ],
+      "Resource": "arn:aws:iam::417589271098:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS",
+      "Condition": {
+        "StringLike": {
+          "iam:AWSServiceName": "ecs.amazonaws.com"
+        }
+      }
+    }
+  ]
+}

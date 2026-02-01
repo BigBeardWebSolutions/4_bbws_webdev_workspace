@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudWatchLogsFullAccess",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DeleteLogGroup",
+        "logs:DeleteLogStream",
+        "logs:PutRetentionPolicy",
+        "logs:TagLogGroup",
+        "logs:StartQuery",
+        "logs:StopQuery",
+        "logs:GetQueryResults"
+      ],
+      "Resource": "arn:aws:logs:eu-west-1:417589271098:*"
+    }
+  ]
+}
