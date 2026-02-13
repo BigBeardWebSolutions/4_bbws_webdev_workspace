@@ -33,7 +33,8 @@ This repository contains the deployment package and workspace configuration for 
 │   └── WebDevInfraPolicy.json
 ├── scripts/
 │   ├── bootstrap-sandbox.sh     # Bootstrap AWS resources
-│   └── setup-webdev-env.sh      # Team member setup script
+│   ├── setup-webdev-env.sh      # Team member setup script
+│   └── FIX_EXTRACTED_SITE_PROMPT.md  # Prompt to fix extracted sites
 ├── docs/
 │   └── ONBOARDING.md            # Team onboarding guide
 └── .claude/                     # TBT workflow files
