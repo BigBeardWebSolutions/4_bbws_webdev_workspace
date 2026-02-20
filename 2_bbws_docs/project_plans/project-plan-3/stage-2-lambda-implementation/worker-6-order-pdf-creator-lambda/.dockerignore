@@ -1,0 +1,41 @@
+# Exclude test files from Lambda package
+tests/
+htmlcov/
+.coverage
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.pytest_cache/
+.tox/
+.coverage.*
+
+# Documentation
+*.md
+docs/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Environment
+.env
+.env.*
+venv/
+env/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

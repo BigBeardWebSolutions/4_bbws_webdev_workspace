@@ -1,0 +1,18 @@
+{
+  "alb_listener_arn": "arn:aws:elasticloadbalancing:eu-west-1:536580886816:listener/app/dev-alb/abc123/def456",
+  "alb_rule_priority": 10,
+  "old_host_header": "tenant1.*.nip.io",
+  "new_host_header": "tenant1.wpdev.kimmyai.io",
+  "cluster": "dev-cluster",
+  "service_prefix": "dev",
+  "task_definition_updates": {
+    "WORDPRESS_CONFIG_EXTRA": "if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; } if (isset($_SERVER['HTTP_CLOUDFRONT_FORWARDED_PROTO']) && $_SERVER['HTTP_CLOUDFRONT_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; } define('FORCE_SSL_ADMIN', true); define('WP_HOME', 'https://tenant1.wpdev.kimmyai.io'); define('WP_SITEURL', 'https://tenant1.wpdev.kimmyai.io');"
+  },
+  "route53_zone_id": "Z0123456789ABC",
+  "old_dns_record": null,
+  "new_dns_record": "tenant1.wpdev.kimmyai.io",
+  "dns_target": "d111111abcdef8.cloudfront.net",
+  "wordpress_config_updates": null,
+  "region": "eu-west-1",
+  "aws_profile": "Tebogo-dev"
+}

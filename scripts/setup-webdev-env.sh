@@ -77,11 +77,38 @@ echo ""
 #-------------------------------------------------------------------------------
 if [ "$OS_TYPE" = "macOS" ]; then
     echo_step "Step 1: Checking Homebrew..."
+
+    # Determine Homebrew path based on architecture
+    if [ "$(uname -m)" = "arm64" ]; then
+        BREW_PREFIX="/opt/homebrew"
+    else
+        BREW_PREFIX="/usr/local"
+    fi
+
     if ! command -v brew &> /dev/null; then
         echo_warn "Homebrew not found. Installing..."
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+        # Add Homebrew to PATH for current session
+        echo_info "Adding Homebrew to PATH..."
+        eval "$($BREW_PREFIX/bin/brew shellenv)"
+
+        # Add to shell profile for persistence
+        SHELL_PROFILE="$HOME/.bash_profile"
+        if [ -n "$ZSH_VERSION" ] || [ "$SHELL" = "/bin/zsh" ]; then
+            SHELL_PROFILE="$HOME/.zprofile"
+        fi
+
+        if ! grep -q 'brew shellenv' "$SHELL_PROFILE" 2>/dev/null; then
+            echo "" >> "$SHELL_PROFILE"
+            echo "# Homebrew" >> "$SHELL_PROFILE"
+            echo "eval \"\$($BREW_PREFIX/bin/brew shellenv)\"" >> "$SHELL_PROFILE"
+            echo_info "Added Homebrew to $SHELL_PROFILE"
+        fi
     else
         echo_info "Homebrew is already installed"
+        # Ensure Homebrew is in PATH for current session
+        eval "$($BREW_PREFIX/bin/brew shellenv)" 2>/dev/null || true
     fi
     echo ""
 fi
@@ -220,11 +247,17 @@ echo ""
 #-------------------------------------------------------------------------------
 echo_step "Step 7: Checking Claude Code..."
 if command -v claude &> /dev/null; then
-    echo_info "Claude Code is already installed"
+    echo_info "Claude Code is already installed: $(claude --version 2>/dev/null || echo 'version unknown')"
 else
-    echo_warn "Claude Code not found."
-    echo "  To install, run: npm install -g @anthropic-ai/claude-code"
-    echo "  Or: brew install claude-code"
+    echo_warn "Claude Code not found. Installing..."
+    if [ "$OS_TYPE" = "macOS" ]; then
+        brew install --cask claude-code
+        echo_info "Claude Code installed successfully"
+        echo_info "Run 'claude' and follow the authentication prompts to complete setup"
+    else
+        echo_warn "Claude Code auto-install is only available on macOS"
+        echo "  For Linux, install Node.js and run: npm install -g @anthropic-ai/claude-code"
+    fi
 fi
 echo ""
 

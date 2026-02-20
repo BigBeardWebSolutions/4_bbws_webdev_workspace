@@ -1,0 +1,41 @@
+[tool.poetry]
+name = "update-order-lambda"
+version = "1.0.0"
+description = "Update Order Lambda function for BBWS Order Service"
+authors = ["BBWS Team"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+boto3 = "^1.34.0"
+pydantic = "1.10.18"
+python-dateutil = "^2.8.2"
+pytz = "^2023.3"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.4.3"
+pytest-cov = "^4.1.0"
+pytest-mock = "^3.12.0"
+moto = "^4.2.9"
+black = "^23.12.0"
+flake8 = "^6.1.0"
+mypy = "^1.7.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "--cov=src --cov-report=html --cov-report=term-missing --cov-fail-under=80"

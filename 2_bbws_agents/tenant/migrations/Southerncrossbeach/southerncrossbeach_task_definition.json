@@ -1,0 +1,84 @@
+{
+  "family": "dev-southerncrossbeach",
+  "taskRoleArn": "arn:aws:iam::536580886816:role/dev-ecs-task-role",
+  "executionRoleArn": "arn:aws:iam::536580886816:role/dev-ecs-task-execution-role",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "wordpress",
+      "image": "wordpress:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "hostPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "WORDPRESS_DEBUG",
+          "value": "0"
+        },
+        {
+          "name": "WORDPRESS_DB_HOST",
+          "value": "dev-mysql.c9ko42mci6mt.eu-west-1.rds.amazonaws.com:3306"
+        },
+        {
+          "name": "WORDPRESS_DB_NAME",
+          "value": "tenant_southerncrossbeach_db"
+        },
+        {
+          "name": "WORDPRESS_CONFIG_EXTRA",
+          "value": "$_SERVER['HTTPS'] = 'on';\ndefine('FORCE_SSL_ADMIN', false);\ndefine('WP_HOME', 'https://southerncrossbeach.wpdev.kimmyai.io');\ndefine('WP_SITEURL', 'https://southerncrossbeach.wpdev.kimmyai.io');\ndefine('WP_ENVIRONMENT_TYPE', 'development');"
+        },
+        {
+          "name": "WORDPRESS_TABLE_PREFIX",
+          "value": "wp_"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "WORDPRESS_DB_USER",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:536580886816:secret:dev-southerncrossbeach-db-credentials-FVYXcG:username::"
+        },
+        {
+          "name": "WORDPRESS_DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:536580886816:secret:dev-southerncrossbeach-db-credentials-FVYXcG:password::"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "wp-content",
+          "containerPath": "/var/www/html/wp-content",
+          "readOnly": false
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/dev",
+          "awslogs-region": "eu-west-1",
+          "awslogs-stream-prefix": "southerncrossbeach"
+        }
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "wp-content",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-0e1cccd971a35db46",
+        "rootDirectory": "/",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-0ddee9c49e40c60b9",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ]
+}

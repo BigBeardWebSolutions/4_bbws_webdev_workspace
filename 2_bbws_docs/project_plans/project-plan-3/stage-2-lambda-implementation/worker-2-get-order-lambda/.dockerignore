@@ -1,0 +1,24 @@
+# Exclude test files from Lambda package
+tests/
+*.pyc
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Exclude development files
+.git/
+.gitignore
+README.md
+pytest.ini
+
+# Exclude virtual environments
+venv/
+env/
+ENV/
+
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo

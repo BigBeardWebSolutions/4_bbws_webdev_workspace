@@ -1,0 +1,47 @@
+[tool.poetry]
+name = "order-internal-notification-sender"
+version = "1.0.0"
+description = "Lambda function to send internal notifications for new orders"
+authors = ["BBWS Team"]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pydantic = "1.10.18"
+boto3 = "^1.26.0"
+jinja2 = "^3.1.2"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+pytest-mock = "^3.11.1"
+moto = {extras = ["dynamodb", "ses", "s3", "sqs"], version = "^4.2.0"}
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = [
+    "--verbose",
+    "--cov=src",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-fail-under=80"
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "**/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

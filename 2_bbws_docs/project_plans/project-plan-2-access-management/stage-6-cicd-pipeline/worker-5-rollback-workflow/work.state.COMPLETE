@@ -1,0 +1,3 @@
+Status: COMPLETE
+Completed: 2026-01-25
+Deliverables: rollback-lambda.yml, rollback-terraform.yml, rollback-service.sh, deployments table schema

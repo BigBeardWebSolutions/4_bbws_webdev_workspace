@@ -1,0 +1,9 @@
+#The website extractor is now ready to use! You can run it with:
+python3 website_extractor.py https://example.com --output ./extracted_site --validate
+#Make sure you have the required dependencies installed first:
+pip3 install requests beautifulsoup4 tqdm
+
+
+#to run with logs: python3 website_extractor_v4_css_fix.py https://victor.co.za \
+    --output ./victor_v4 \
+    --validate

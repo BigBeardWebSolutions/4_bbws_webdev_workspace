@@ -1,0 +1,16 @@
+{
+  "alb_listener_arn": "arn:aws:elasticloadbalancing:eu-west-1:536580886816:listener/app/dev-alb/abc123/def456",
+  "alb_rule_priority": 10,
+  "old_host_header": "tenant1.*.nip.io",
+  "new_host_header": null,
+  "cluster": "dev-cluster",
+  "service_prefix": "dev",
+  "task_definition_updates": null,
+  "route53_zone_id": null,
+  "old_dns_record": null,
+  "new_dns_record": null,
+  "dns_target": null,
+  "wordpress_config_updates": null,
+  "region": "eu-west-1",
+  "aws_profile": "Tebogo-dev"
+}

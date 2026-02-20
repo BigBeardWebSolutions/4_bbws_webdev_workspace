@@ -1,0 +1,589 @@
+name: Deploy Tenant (Reusable Workflow)
+
+on:
+  workflow_call:
+    inputs:
+      tenant_name:
+        description: 'Tenant name (e.g., goldencrust, sunsetbistro)'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment (dev, sit, prod)'
+        required: true
+        type: string
+      alb_priority:
+        description: 'ALB listener rule priority (unique per tenant per environment)'
+        required: true
+        type: number
+      deploy_phase:
+        description: 'Deployment phase (ecs, database, dns, all)'
+        required: false
+        type: string
+        default: 'all'
+      terraform_action:
+        description: 'Terraform action (plan, apply, destroy)'
+        required: false
+        type: string
+        default: 'apply'
+
+    secrets:
+      AWS_REGION:
+        required: true
+      AWS_ACCOUNT_ID:
+        required: true
+
+env:
+  TF_VERSION: '1.7.0'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  validate:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.validate.outputs.environment }}
+      aws_profile: ${{ steps.validate.outputs.aws_profile }}
+      domain_suffix: ${{ steps.validate.outputs.domain_suffix }}
+      domain_name: ${{ steps.validate.outputs.domain_name }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate Tenant Name
+        id: validate
+        run: |
+          TENANT="${{ inputs.tenant_name }}"
+          ENV="${{ inputs.environment }}"
+
+          # Validate tenant name format
+          if ! [[ "$TENANT" =~ ^[a-z0-9]+$ ]]; then
+            echo "❌ Error: Tenant name must contain only lowercase letters and numbers"
+            exit 1
+          fi
+
+          # Set environment-specific variables
+          case "$ENV" in
+            dev)
+              echo "aws_profile=Tebogo-dev" >> $GITHUB_OUTPUT
+              echo "domain_suffix=wpdev.kimmyai.io" >> $GITHUB_OUTPUT
+              echo "environment=dev" >> $GITHUB_OUTPUT
+              ;;
+            sit)
+              echo "aws_profile=Tebogo-sit" >> $GITHUB_OUTPUT
+              echo "domain_suffix=wpsit.kimmyai.io" >> $GITHUB_OUTPUT
+              echo "environment=sit" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "aws_profile=Tebogo-prod" >> $GITHUB_OUTPUT
+              echo "domain_suffix=wp.kimmyai.io" >> $GITHUB_OUTPUT
+              echo "environment=prod" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "❌ Error: Environment must be dev, sit, or prod"
+              exit 1
+              ;;
+          esac
+
+          # Generate domain name
+          DOMAIN="${TENANT}.$(echo $domain_suffix)"
+          echo "domain_name=${DOMAIN}" >> $GITHUB_OUTPUT
+
+          echo "✅ Validation passed:"
+          echo "  - Tenant: $TENANT"
+          echo "  - Environment: $ENV"
+          echo "  - Domain: ${TENANT}.${domain_suffix}"
+          echo "  - ALB Priority: ${{ inputs.alb_priority }}"
+
+      - name: Check ALB Priority Conflicts
+        run: |
+          echo "🔍 Checking for ALB priority conflicts..."
+          # TODO: Implement priority conflict check
+          # Should query existing listener rules and ensure priority is unique
+          echo "⚠️  Priority conflict check not yet implemented"
+
+  phase1-ecs:
+    name: 'Phase 1: ECS Infrastructure'
+    needs: validate
+    runs-on: ubuntu-latest
+    if: inputs.deploy_phase == 'all' || inputs.deploy_phase == 'ecs'
+    environment: ${{ inputs.environment }}
+
+    defaults:
+      run:
+        working-directory: ./terraform-workspace
+
+    steps:
+      - name: Checkout 2_bbws_agents
+        uses: actions/checkout@v4
+        with:
+          path: 2_bbws_agents
+
+      - name: Checkout 2_bbws_ecs_terraform
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/2_bbws_ecs_terraform
+          path: 2_bbws_ecs_terraform
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-terraform
+          role-session-name: GitHubActions-${{ inputs.tenant_name }}-${{ inputs.environment }}
+
+      - name: Create Tenant Terraform Configuration
+        run: |
+          # Create working directory for tenant
+          mkdir -p terraform-workspace
+          cd terraform-workspace
+
+          # Create main.tf calling ecs-tenant module
+          cat > main.tf <<'EOF'
+          module "tenant_ecs" {
+            source = "../2_bbws_ecs_terraform/terraform/modules/ecs-tenant"
+
+            tenant_name  = var.tenant_name
+            environment  = var.environment
+            domain_name  = var.domain_name
+            alb_priority = var.alb_priority
+
+            # Shared infrastructure (data sources to be added)
+            vpc_id                       = data.aws_vpc.main.id
+            cluster_id                   = data.aws_ecs_cluster.main.id
+            efs_id                       = data.aws_efs_file_system.main.id
+            rds_endpoint                 = data.aws_db_instance.main.address
+            alb_listener_arn             = data.aws_lb_listener.http.arn
+            private_subnet_ids           = data.aws_subnets.private.ids
+            ecs_security_group_ids       = [data.aws_security_group.ecs_tasks.id]
+            ecs_task_execution_role_arn  = data.aws_iam_role.ecs_task_execution.arn
+            ecs_task_role_arn            = data.aws_iam_role.ecs_task.arn
+            cloudwatch_log_group_name    = data.aws_cloudwatch_log_group.ecs.name
+            aws_region                   = var.aws_region
+            wordpress_image              = var.wordpress_image
+          }
+
+          # Data sources for shared infrastructure
+          data "aws_vpc" "main" {
+            filter {
+              name   = "tag:Environment"
+              values = [var.environment]
+            }
+            filter {
+              name   = "tag:Name"
+              values = ["${var.environment}-vpc"]
+            }
+          }
+
+          data "aws_ecs_cluster" "main" {
+            cluster_name = "${var.environment}-cluster"
+          }
+
+          data "aws_efs_file_system" "main" {
+            tags = {
+              Environment = var.environment
+              Name        = "${var.environment}-efs"
+            }
+          }
+
+          data "aws_db_instance" "main" {
+            db_instance_identifier = "${var.environment}-mysql"
+          }
+
+          data "aws_lb" "main" {
+            tags = {
+              Environment = var.environment
+              Name        = "${var.environment}-alb"
+            }
+          }
+
+          data "aws_lb_listener" "http" {
+            load_balancer_arn = data.aws_lb.main.arn
+            port              = 80
+          }
+
+          data "aws_subnets" "private" {
+            filter {
+              name   = "tag:Environment"
+              values = [var.environment]
+            }
+            filter {
+              name   = "tag:Type"
+              values = ["private"]
+            }
+          }
+
+          data "aws_security_group" "ecs_tasks" {
+            tags = {
+              Environment = var.environment
+              Name        = "${var.environment}-ecs-tasks-sg"
+            }
+          }
+
+          data "aws_iam_role" "ecs_task_execution" {
+            name = "${var.environment}-ecs-task-execution"
+          }
+
+          data "aws_iam_role" "ecs_task" {
+            name = "${var.environment}-ecs-task-role"
+          }
+
+          data "aws_cloudwatch_log_group" "ecs" {
+            name = "/ecs/${var.environment}-cluster"
+          }
+          EOF
+
+          # Create variables.tf
+          cat > variables.tf <<'EOF'
+          variable "tenant_name" {
+            type = string
+          }
+
+          variable "environment" {
+            type = string
+          }
+
+          variable "domain_name" {
+            type = string
+          }
+
+          variable "alb_priority" {
+            type = number
+          }
+
+          variable "aws_region" {
+            type = string
+          }
+
+          variable "wordpress_image" {
+            type = string
+          }
+          EOF
+
+          # Create backend.tf
+          cat > backend.tf <<'EOF'
+          terraform {
+            backend "s3" {}
+          }
+          EOF
+
+          # Create outputs.tf
+          cat > outputs.tf <<'EOF'
+          output "tenant_config" {
+            value = module.tenant_ecs.tenant_config
+          }
+
+          output "db_secret_arn" {
+            value = module.tenant_ecs.db_secret_arn
+          }
+          EOF
+
+      - name: Terraform Init (Phase 1)
+        run: |
+          terraform init \
+            -backend-config="bucket=bbws-terraform-state-${{ inputs.environment }}" \
+            -backend-config="key=tenants/${{ inputs.tenant_name }}/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="dynamodb_table=bbws-terraform-locks$([ "${{ inputs.environment }}" == "sit" ] && echo "-sit" || echo "")" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform Plan (Phase 1)
+        id: plan
+        run: |
+          terraform plan \
+            -var="tenant_name=${{ inputs.tenant_name }}" \
+            -var="environment=${{ inputs.environment }}" \
+            -var="domain_name=${{ needs.validate.outputs.domain_name }}" \
+            -var="alb_priority=${{ inputs.alb_priority }}" \
+            -var="aws_region=${{ secrets.AWS_REGION }}" \
+            -var="wordpress_image=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.environment }}-wordpress:latest" \
+            -out=phase1.tfplan
+
+      - name: Terraform Apply (Phase 1)
+        if: inputs.terraform_action == 'apply'
+        run: |
+          terraform apply -auto-approve phase1.tfplan
+
+      - name: Get Outputs
+        if: inputs.terraform_action == 'apply'
+        id: outputs
+        run: |
+          DB_SECRET_ARN=$(terraform output -raw db_secret_arn)
+          echo "db_secret_arn=${DB_SECRET_ARN}" >> $GITHUB_OUTPUT
+          echo "✅ Phase 1 Complete: ECS infrastructure deployed"
+
+  phase2-database:
+    name: 'Phase 2: Database Creation'
+    needs: [validate, phase1-ecs]
+    runs-on: ubuntu-latest
+    if: inputs.deploy_phase == 'all' || inputs.deploy_phase == 'database'
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout 2_bbws_agents
+        uses: actions/checkout@v4
+        with:
+          path: 2_bbws_agents
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python Dependencies
+        run: |
+          pip install boto3 pymysql
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-terraform
+          role-session-name: GitHubActions-${{ inputs.tenant_name }}-${{ inputs.environment }}
+
+      - name: Get Database Secret ARN
+        id: get-secret
+        run: |
+          # Get secret ARN from Secrets Manager
+          SECRET_ARN=$(aws secretsmanager list-secrets \
+            --query "SecretList[?Name=='${{ inputs.environment }}-${{ inputs.tenant_name }}-db-credentials'].ARN | [0]" \
+            --output text)
+
+          if [ -z "$SECRET_ARN" ] || [ "$SECRET_ARN" == "None" ]; then
+            echo "❌ Error: Database secret not found. Phase 1 may have failed."
+            exit 1
+          fi
+
+          echo "db_secret_arn=${SECRET_ARN}" >> $GITHUB_OUTPUT
+          echo "✅ Found database secret: ${SECRET_ARN}"
+
+      - name: Create Tenant Database
+        run: |
+          cd 2_bbws_agents
+          python3 utils/init_tenant_db.py \
+            --tenant-name "${{ inputs.tenant_name }}" \
+            --environment "${{ inputs.environment }}" \
+            --secret-arn "${{ steps.get-secret.outputs.db_secret_arn }}" \
+            --region "${{ secrets.AWS_REGION }}"
+
+          echo "✅ Phase 2 Complete: Database created"
+
+  phase3-testing:
+    name: 'Phase 3: Deployment Testing'
+    needs: [validate, phase1-ecs, phase2-database]
+    runs-on: ubuntu-latest
+    if: (inputs.deploy_phase == 'all' || inputs.deploy_phase == 'testing') && (inputs.environment == 'dev' || inputs.environment == 'sit')
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-terraform
+          role-session-name: GitHubActions-${{ inputs.tenant_name }}-${{ inputs.environment }}
+
+      - name: Wait for Service to Stabilize
+        run: |
+          echo "⏳ Waiting for ECS service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster "${{ inputs.environment }}-cluster" \
+            --services "${{ inputs.environment }}-${{ inputs.tenant_name }}-service" \
+            --region "${{ secrets.AWS_REGION }}"
+
+          echo "✅ ECS service is stable"
+
+      - name: Check Service Health
+        run: |
+          # Get service details
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster "${{ inputs.environment }}-cluster" \
+            --services "${{ inputs.environment }}-${{ inputs.tenant_name }}-service" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --query 'services[0].{running:runningCount,desired:desiredCount}' \
+            --output json)
+
+          RUNNING=$(echo $SERVICE_STATUS | jq -r '.running')
+          DESIRED=$(echo $SERVICE_STATUS | jq -r '.desired')
+
+          echo "📊 Service Status: $RUNNING/$DESIRED tasks running"
+
+          if [ "$RUNNING" != "$DESIRED" ]; then
+            echo "❌ Error: Service not healthy ($RUNNING/$DESIRED tasks)"
+            exit 1
+          fi
+
+          echo "✅ Service health check passed"
+
+      - name: Check Target Health
+        run: |
+          # Get target group ARN
+          TG_ARN=$(aws elbv2 describe-target-groups \
+            --query "TargetGroups[?TargetGroupName=='${{ inputs.environment }}-${{ inputs.tenant_name }}-tg'].TargetGroupArn | [0]" \
+            --output text)
+
+          if [ -z "$TG_ARN" ]; then
+            echo "❌ Error: Target group not found"
+            exit 1
+          fi
+
+          # Check target health
+          HEALTH=$(aws elbv2 describe-target-health \
+            --target-group-arn "$TG_ARN" \
+            --query 'TargetHealthDescriptions[0].TargetHealth.State' \
+            --output text)
+
+          echo "📊 Target Health: $HEALTH"
+
+          if [ "$HEALTH" != "healthy" ]; then
+            echo "❌ Error: Target is not healthy (status: $HEALTH)"
+            exit 1
+          fi
+
+          echo "✅ Target health check passed"
+
+      - name: Test HTTP Endpoint
+        run: |
+          # Get ALB DNS name
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --query "LoadBalancers[?LoadBalancerName=='${{ inputs.environment }}-alb'].DNSName | [0]" \
+            --output text)
+
+          if [ -z "$ALB_DNS" ]; then
+            echo "❌ Error: ALB not found"
+            exit 1
+          fi
+
+          echo "🔍 Testing HTTP endpoint: $ALB_DNS"
+
+          # Test with Host header
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Host: ${{ needs.validate.outputs.domain_name }}" \
+            "http://${ALB_DNS}/")
+
+          echo "📊 HTTP Response Code: $HTTP_CODE"
+
+          if [[ ! "$HTTP_CODE" =~ ^(200|301|302)$ ]]; then
+            echo "❌ Error: Unexpected HTTP response code: $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "✅ HTTP endpoint test passed"
+
+      - name: Phase 3 Summary
+        run: |
+          echo "✅ Phase 3 Complete: All tests passed"
+          echo ""
+          echo "📋 Deployment Summary:"
+          echo "  - Tenant: ${{ inputs.tenant_name }}"
+          echo "  - Environment: ${{ inputs.environment }}"
+          echo "  - Domain: ${{ needs.validate.outputs.domain_name }}"
+          echo "  - ECS Service: ✅ Healthy"
+          echo "  - ALB Target: ✅ Healthy"
+          echo "  - HTTP Endpoint: ✅ Responding"
+
+  phase3-dns:
+    name: 'Phase 3: DNS Configuration'
+    needs: [validate, phase1-ecs, phase2-database]
+    runs-on: ubuntu-latest
+    if: (inputs.deploy_phase == 'all' || inputs.deploy_phase == 'dns') && inputs.environment == 'prod'
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Placeholder - DNS Configuration
+        run: |
+          echo "🚧 DNS configuration for PROD not yet implemented"
+          echo "This step would create Route53 records pointing to CloudFront"
+          echo ""
+          echo "Manual steps required:"
+          echo "1. Verify CloudFront distribution is configured for: ${{ needs.validate.outputs.domain_name }}"
+          echo "2. Create Route53 A record: ${{ needs.validate.outputs.domain_name }} -> CloudFront"
+          echo "3. Test HTTPS access: https://${{ needs.validate.outputs.domain_name }}"
+
+  generate-config:
+    name: Generate Tenant Configuration
+    needs: [validate, phase1-ecs, phase2-database]
+    runs-on: ubuntu-latest
+    if: inputs.terraform_action == 'apply' && always() && needs.phase1-ecs.result == 'success'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-terraform
+          role-session-name: GitHubActions-${{ inputs.tenant_name }}-${{ inputs.environment }}
+
+      - name: Generate Tenant Config
+        run: |
+          mkdir -p config/${{ inputs.environment }}
+
+          cat > config/${{ inputs.environment }}/${{ inputs.tenant_name }}.json <<EOF
+          {
+            "tenant_name": "${{ inputs.tenant_name }}",
+            "environment": "${{ inputs.environment }}",
+            "deployment_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "deployed_by": "github-actions",
+            "workflow_run": "${{ github.run_id }}",
+            "url": "https://${{ needs.validate.outputs.domain_name }}",
+            "infrastructure": {
+              "service_name": "${{ inputs.environment }}-${{ inputs.tenant_name }}-service",
+              "cluster": "${{ inputs.environment }}-cluster",
+              "alb_priority": ${{ inputs.alb_priority }},
+              "target_group": "${{ inputs.environment }}-${{ inputs.tenant_name }}-tg"
+            },
+            "terraform": {
+              "workspace": "${{ inputs.environment }}",
+              "state_bucket": "bbws-terraform-state-${{ inputs.environment }}",
+              "state_key": "tenants/${{ inputs.tenant_name }}/terraform.tfstate"
+            }
+          }
+          EOF
+
+          echo "✅ Generated tenant configuration"
+          cat config/${{ inputs.environment }}/${{ inputs.tenant_name }}.json
+
+      - name: Commit Configuration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add config/${{ inputs.environment }}/${{ inputs.tenant_name }}.json
+          git commit -m "chore: update ${{ inputs.tenant_name }} config for ${{ inputs.environment }} [skip ci]" || true
+          git push || true
+
+  summary:
+    name: Deployment Summary
+    needs: [validate, phase1-ecs, phase2-database, phase3-testing, phase3-dns, generate-config]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "# Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tenant:** ${{ inputs.tenant_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Domain:** ${{ needs.validate.outputs.domain_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**ALB Priority:** ${{ inputs.alb_priority }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Phase Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Validation: ${{ needs.validate.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ${{ needs.phase1-ecs.result == 'success' && '✅' || '❌' }} Phase 1 (ECS): ${{ needs.phase1-ecs.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ${{ needs.phase2-database.result == 'success' && '✅' || '❌' }} Phase 2 (Database): ${{ needs.phase2-database.result }}" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ inputs.environment }}" != "prod" ]; then
+            echo "- ${{ needs.phase3-testing.result == 'success' && '✅' || '❌' }} Phase 3 (Testing): ${{ needs.phase3-testing.result }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ${{ needs.phase3-dns.result == 'success' && '✅' || '❌' }} Phase 3 (DNS): ${{ needs.phase3-dns.result }}" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,27 @@
+{
+  "comment": "Example configuration for migrating a tenant from DEV to SIT environment",
+  "from_config": {
+    "cluster": "dev-cluster",
+    "service_prefix": "dev",
+    "region": "eu-west-1",
+    "aws_profile": "Tebogo-dev",
+    "old_host_header": "tenant1.wpdev.kimmyai.io",
+    "route53_zone_id": "Z0123456789ABC",
+    "old_dns_record": "tenant1.wpdev.kimmyai.io"
+  },
+  "to_config": {
+    "alb_listener_arn": "arn:aws:elasticloadbalancing:eu-west-1:815856636111:listener/app/sit-alb/xyz789/uvw012",
+    "alb_rule_priority": 10,
+    "new_host_header": "tenant1.wpsit.kimmyai.io",
+    "cluster": "sit-cluster",
+    "service_prefix": "sit",
+    "task_definition_updates": {
+      "WORDPRESS_CONFIG_EXTRA": "if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; } if (isset($_SERVER['HTTP_CLOUDFRONT_FORWARDED_PROTO']) && $_SERVER['HTTP_CLOUDFRONT_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; } define('FORCE_SSL_ADMIN', true); define('WP_HOME', 'https://tenant1.wpsit.kimmyai.io'); define('WP_SITEURL', 'https://tenant1.wpsit.kimmyai.io');"
+    },
+    "route53_zone_id": "Z9876543210XYZ",
+    "new_dns_record": "tenant1.wpsit.kimmyai.io",
+    "dns_target": "d222222abcdef8.cloudfront.net",
+    "region": "eu-west-1",
+    "aws_profile": "Tebogo-sit"
+  }
+}

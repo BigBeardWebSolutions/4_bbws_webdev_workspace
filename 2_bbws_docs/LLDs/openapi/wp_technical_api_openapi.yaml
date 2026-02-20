@@ -1,0 +1,1127 @@
+openapi: 3.0.3
+info:
+  title: BBWS WordPress Technical Management API
+  description: |
+    WordPress Technical Management API for BBWS Multi-Tenant WordPress Hosting Platform.
+
+    Provides the API layer that exposes WordPress functionality to consumer applications
+    (Customer Portal Private, Admin Portal) and manages WordPress sites, templates,
+    plugins, and asynchronous site operations.
+
+    ## Domains
+    - **Sites API**: WordPress site CRUD operations, lifecycle management
+    - **Templates API**: Template management and application
+    - **Plugins API**: Plugin marketplace and per-site management
+
+    ## Container Architecture
+    Each Tenant runs in a dedicated ECS Fargate task. Sites are managed within
+    WordPress Multisite inside each tenant container.
+
+  version: 1.0.0
+  contact:
+    name: BBWS Platform Team
+    email: platform@bbws.io
+
+servers:
+  - url: https://api.dev.bbws.io/v1.0
+    description: Development
+  - url: https://api.sit.bbws.io/v1.0
+    description: SIT
+  - url: https://api.bbws.io/v1.0
+    description: Production
+
+tags:
+  - name: Sites
+    description: WordPress site lifecycle management
+  - name: Templates
+    description: Template discovery and application
+  - name: Plugins
+    description: Plugin marketplace and management
+
+paths:
+  # ============ SITES API ============
+  /tenants/{tenantId}/sites:
+    post:
+      tags:
+        - Sites
+      summary: Create WordPress site
+      description: |
+        Creates a new WordPress site within the tenant. Site creation is asynchronous -
+        returns 202 Accepted with siteId. Poll GET /sites/{siteId} for status.
+      operationId: createSite
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSiteRequest'
+            example:
+              siteName: "My Business Site"
+              subdomain: "mybusiness"
+              templateId: "template-123"
+              environment: "DEV"
+      responses:
+        '202':
+          description: Site creation initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteCreationResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Subdomain already in use
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Site quota exceeded or no active subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      tags:
+        - Sites
+      summary: List sites
+      description: Returns a paginated list of sites within the tenant.
+      operationId: listSites
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/SiteStatus'
+        - name: environment
+          in: query
+          schema:
+            $ref: '#/components/schemas/Environment'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: nextToken
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of sites
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteListResponse'
+
+  /tenants/{tenantId}/sites/{siteId}:
+    get:
+      tags:
+        - Sites
+      summary: Get site details
+      description: Retrieve complete site information including status and health.
+      operationId: getSite
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '200':
+          description: Site details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags:
+        - Sites
+      summary: Update site configuration
+      description: Update site settings. Site must be in ACTIVE status.
+      operationId: updateSite
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSiteRequest'
+      responses:
+        '200':
+          description: Site updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Sites
+      summary: Delete/archive site
+      description: |
+        Delete a WordPress site. PROD sites have 24-hour soft-delete period.
+        A backup is created before deletion.
+      operationId: deleteSite
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+        - name: force
+          in: query
+          description: Skip 24-hour soft-delete for PROD
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Site deletion initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteDeletionResponse'
+        '403':
+          description: Not authorized to delete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tenants/{tenantId}/sites/{siteId}/status:
+    put:
+      tags:
+        - Sites
+      summary: Suspend/activate site
+      description: Toggle site between ACTIVE and SUSPENDED status.
+      operationId: updateSiteStatus
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [ACTIVE, SUSPENDED]
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+
+  /tenants/{tenantId}/sites/{siteId}/clone:
+    post:
+      tags:
+        - Sites
+      summary: Clone site
+      description: |
+        Create a copy of an existing site. Cloning is asynchronous.
+        Database and files are duplicated. New site gets new identifiers.
+      operationId: cloneSite
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - siteName
+                - subdomain
+              properties:
+                siteName:
+                  type: string
+                subdomain:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'
+      responses:
+        '202':
+          description: Clone initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteCreationResponse'
+        '422':
+          description: Site quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tenants/{tenantId}/sites/{siteId}/promote:
+    post:
+      tags:
+        - Sites
+      summary: Promote environment
+      description: |
+        Promote site from DEV to SIT, or SIT to PROD.
+        Creates backup before promotion.
+
+        **Valid Promotions:**
+        - DEV -> SIT
+        - SIT -> PROD
+
+        PROD is read-only and cannot be promoted.
+      operationId: promoteSite
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - targetEnvironment
+              properties:
+                targetEnvironment:
+                  type: string
+                  enum: [SIT, PROD]
+      responses:
+        '202':
+          description: Promotion initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteCreationResponse'
+        '422':
+          description: Invalid promotion path
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tenants/{tenantId}/sites/{siteId}/health:
+    get:
+      tags:
+        - Sites
+      summary: Get site health
+      description: Returns current health status of the site.
+      operationId: getSiteHealth
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteHealth'
+
+  /tenants/{tenantId}/sites/{siteId}/backup:
+    post:
+      tags:
+        - Sites
+      summary: Create backup
+      description: Create an on-demand backup of the site.
+      operationId: createBackup
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '202':
+          description: Backup initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backupId:
+                    type: string
+                  status:
+                    type: string
+                    enum: [IN_PROGRESS]
+                  createdAt:
+                    type: string
+                    format: date-time
+
+  /tenants/{tenantId}/sites/{siteId}/apply-template:
+    post:
+      tags:
+        - Sites
+      summary: Apply template to site
+      description: |
+        Apply a template to an existing site. Replaces theme and default content.
+        Included plugins are installed automatically.
+      operationId: applyTemplate
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - templateId
+              properties:
+                templateId:
+                  type: string
+                confirmReplacement:
+                  type: boolean
+                  default: false
+                  description: Confirm content replacement
+      responses:
+        '200':
+          description: Template applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '422':
+          description: Template incompatible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============ TEMPLATES API ============
+  /templates:
+    get:
+      tags:
+        - Templates
+      summary: List available templates
+      description: Returns list of PUBLISHED templates available for use.
+      operationId: listTemplates
+      parameters:
+        - name: category
+          in: query
+          schema:
+            $ref: '#/components/schemas/TemplateCategory'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: nextToken
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+
+  /templates/{templateId}:
+    get:
+      tags:
+        - Templates
+      summary: Get template details
+      description: Retrieve complete template information including screenshots and plugins.
+      operationId: getTemplate
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Template details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '404':
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /templates/{templateId}/preview:
+    get:
+      tags:
+        - Templates
+      summary: Get template preview URL
+      description: Returns demo URL for previewing the template.
+      operationId: previewTemplate
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Preview URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  previewUrl:
+                    type: string
+                    format: uri
+                  expiresAt:
+                    type: string
+                    format: date-time
+
+  # ============ PLUGINS API ============
+  /plugins:
+    get:
+      tags:
+        - Plugins
+      summary: List available plugins
+      description: Returns plugins available in the marketplace.
+      operationId: listPlugins
+      parameters:
+        - name: category
+          in: query
+          schema:
+            $ref: '#/components/schemas/PluginCategory'
+        - name: pricing
+          in: query
+          schema:
+            type: string
+            enum: [FREE, PREMIUM]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: nextToken
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of plugins
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginListResponse'
+
+  /plugins/{pluginId}:
+    get:
+      tags:
+        - Plugins
+      summary: Get plugin details
+      description: Retrieve complete plugin information.
+      operationId: getPlugin
+      parameters:
+        - name: pluginId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plugin details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plugin'
+
+  /tenants/{tenantId}/sites/{siteId}/plugins:
+    get:
+      tags:
+        - Plugins
+      summary: List installed plugins
+      description: Returns plugins installed on the site.
+      operationId: listInstalledPlugins
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '200':
+          description: List of installed plugins
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstalledPluginListResponse'
+
+    post:
+      tags:
+        - Plugins
+      summary: Install plugin
+      description: |
+        Install a plugin on the site. Security scan runs before installation.
+        Blocklisted plugins cannot be installed.
+      operationId: installPlugin
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - pluginId
+              properties:
+                pluginId:
+                  type: string
+                version:
+                  type: string
+                  description: Specific version (optional, defaults to latest)
+      responses:
+        '201':
+          description: Plugin installed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstalledPlugin'
+        '409':
+          description: Plugin conflicts with existing plugin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Plugin has security vulnerabilities or is blocklisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tenants/{tenantId}/sites/{siteId}/plugins/{pluginId}:
+    delete:
+      tags:
+        - Plugins
+      summary: Uninstall plugin
+      description: Uninstall a plugin from the site. Plugin is deactivated before removal.
+      operationId: uninstallPlugin
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+        - name: pluginId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Plugin uninstalled
+        '404':
+          description: Plugin not installed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tenants/{tenantId}/sites/{siteId}/plugins/{pluginId}/config:
+    put:
+      tags:
+        - Plugins
+      summary: Configure plugin
+      description: Update plugin settings.
+      operationId: configurePlugin
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+        - name: pluginId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                configuration:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Configuration saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstalledPlugin'
+
+  /tenants/{tenantId}/sites/{siteId}/plugins/{pluginId}/update:
+    put:
+      tags:
+        - Plugins
+      summary: Update plugin
+      description: Update plugin to latest version. Configuration is preserved.
+      operationId: updatePlugin
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+        - name: pluginId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plugin updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstalledPlugin'
+
+  /tenants/{tenantId}/sites/{siteId}/plugins/{pluginId}/status:
+    put:
+      tags:
+        - Plugins
+      summary: Enable/disable plugin
+      description: Toggle plugin active status without uninstalling.
+      operationId: togglePluginStatus
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - $ref: '#/components/parameters/siteId'
+        - name: pluginId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - isActive
+              properties:
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstalledPlugin'
+
+components:
+  parameters:
+    tenantId:
+      name: tenantId
+      in: path
+      required: true
+      description: Tenant identifier
+      schema:
+        type: string
+        pattern: '^tenant-[0-9a-f-]{36}$'
+
+    siteId:
+      name: siteId
+      in: path
+      required: true
+      description: Site identifier
+      schema:
+        type: string
+        pattern: '^site-[0-9a-f-]{36}$'
+
+  schemas:
+    CreateSiteRequest:
+      type: object
+      required:
+        - siteName
+        - subdomain
+      properties:
+        siteName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        subdomain:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'
+          description: 3-63 characters, lowercase alphanumeric and hyphens
+        templateId:
+          type: string
+          nullable: true
+        environment:
+          $ref: '#/components/schemas/Environment'
+
+    UpdateSiteRequest:
+      type: object
+      properties:
+        siteName:
+          type: string
+          maxLength: 100
+        configuration:
+          type: object
+          additionalProperties: true
+
+    Site:
+      type: object
+      properties:
+        siteId:
+          type: string
+        tenantId:
+          type: string
+        siteName:
+          type: string
+        subdomain:
+          type: string
+        siteUrl:
+          type: string
+          format: uri
+        status:
+          $ref: '#/components/schemas/SiteStatus'
+        environment:
+          $ref: '#/components/schemas/Environment'
+        templateId:
+          type: string
+          nullable: true
+        wordpressVersion:
+          type: string
+        phpVersion:
+          type: string
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatus'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        _links:
+          type: object
+          properties:
+            self:
+              type: object
+              properties:
+                href:
+                  type: string
+            plugins:
+              type: object
+              properties:
+                href:
+                  type: string
+            health:
+              type: object
+              properties:
+                href:
+                  type: string
+
+    SiteCreationResponse:
+      type: object
+      properties:
+        siteId:
+          type: string
+        status:
+          type: string
+          enum: [PROVISIONING]
+        message:
+          type: string
+          example: "Site creation initiated. Poll GET /sites/{siteId} for status."
+        estimatedCompletionMinutes:
+          type: integer
+          example: 5
+
+    SiteDeletionResponse:
+      type: object
+      properties:
+        siteId:
+          type: string
+        status:
+          type: string
+          enum: [DEPROVISIONING]
+        message:
+          type: string
+        backupId:
+          type: string
+        softDeleteExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: For PROD sites, when permanent deletion occurs
+
+    SiteListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Site'
+        count:
+          type: integer
+        nextToken:
+          type: string
+          nullable: true
+
+    SiteHealth:
+      type: object
+      properties:
+        siteId:
+          type: string
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        lastChecked:
+          type: string
+          format: date-time
+        responseTimeMs:
+          type: integer
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+                enum: [PASS, FAIL, WARN]
+              message:
+                type: string
+
+    SiteStatus:
+      type: string
+      enum:
+        - PROVISIONING
+        - ACTIVE
+        - SUSPENDED
+        - DEPROVISIONING
+        - FAILED
+
+    Environment:
+      type: string
+      enum:
+        - DEV
+        - SIT
+        - PROD
+
+    HealthStatus:
+      type: string
+      enum:
+        - HEALTHY
+        - DEGRADED
+        - UNHEALTHY
+        - UNKNOWN
+
+    Template:
+      type: object
+      properties:
+        templateId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          $ref: '#/components/schemas/TemplateCategory'
+        version:
+          type: string
+        thumbnailUrl:
+          type: string
+          format: uri
+        screenshots:
+          type: array
+          items:
+            type: string
+            format: uri
+        demoUrl:
+          type: string
+          format: uri
+        status:
+          type: string
+          enum: [DRAFT, PUBLISHED, ARCHIVED]
+        minWordPressVersion:
+          type: string
+        includedPlugins:
+          type: array
+          items:
+            type: string
+        rating:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 5
+        usageCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    TemplateCategory:
+      type: string
+      enum:
+        - BUSINESS
+        - PORTFOLIO
+        - BLOG
+        - ECOMMERCE
+        - OTHER
+
+    TemplateListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Template'
+        count:
+          type: integer
+        nextToken:
+          type: string
+          nullable: true
+
+    Plugin:
+      type: object
+      properties:
+        pluginId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          $ref: '#/components/schemas/PluginCategory'
+        version:
+          type: string
+        iconUrl:
+          type: string
+          format: uri
+        rating:
+          type: number
+          format: float
+        installCount:
+          type: integer
+        pricing:
+          type: string
+          enum: [FREE, PREMIUM]
+        isBlocklisted:
+          type: boolean
+        lastSecurityScan:
+          type: string
+          format: date-time
+        compatibility:
+          type: object
+          properties:
+            minWordPressVersion:
+              type: string
+            maxWordPressVersion:
+              type: string
+
+    PluginCategory:
+      type: string
+      enum:
+        - SEO
+        - SECURITY
+        - PERFORMANCE
+        - FORMS
+        - ECOMMERCE
+        - OTHER
+
+    PluginListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plugin'
+        count:
+          type: integer
+        nextToken:
+          type: string
+          nullable: true
+
+    InstalledPlugin:
+      type: object
+      properties:
+        pluginId:
+          type: string
+        siteId:
+          type: string
+        name:
+          type: string
+        installedVersion:
+          type: string
+        latestVersion:
+          type: string
+        isActive:
+          type: boolean
+        hasUpdate:
+          type: boolean
+        configuration:
+          type: object
+          additionalProperties: true
+        installedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    InstalledPluginListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstalledPlugin'
+        count:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+        requestId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+
+security:
+  - bearerAuth: []
+  - apiKey: []

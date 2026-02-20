@@ -1,0 +1,90 @@
+name: 'Validate Tenant Inputs'
+description: 'Validates tenant name, environment, and generates domain configuration'
+
+inputs:
+  tenant_name:
+    description: 'Tenant name'
+    required: true
+  environment:
+    description: 'Environment (dev, sit, prod)'
+    required: true
+  alb_priority:
+    description: 'ALB listener rule priority'
+    required: true
+
+outputs:
+  domain_name:
+    description: 'Generated domain name for the tenant'
+    value: ${{ steps.validate.outputs.domain_name }}
+  aws_profile:
+    description: 'AWS CLI profile for the environment'
+    value: ${{ steps.validate.outputs.aws_profile }}
+  domain_suffix:
+    description: 'Domain suffix for the environment'
+    value: ${{ steps.validate.outputs.domain_suffix }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate Inputs
+      id: validate
+      shell: bash
+      run: |
+        TENANT="${{ inputs.tenant_name }}"
+        ENV="${{ inputs.environment }}"
+        PRIORITY="${{ inputs.alb_priority }}"
+
+        echo "🔍 Validating inputs..."
+
+        # Validate tenant name format
+        if ! [[ "$TENANT" =~ ^[a-z0-9]+$ ]]; then
+          echo "❌ Error: Tenant name must contain only lowercase letters and numbers"
+          echo "   Provided: $TENANT"
+          exit 1
+        fi
+
+        # Validate environment
+        if [[ ! "$ENV" =~ ^(dev|sit|prod)$ ]]; then
+          echo "❌ Error: Environment must be dev, sit, or prod"
+          echo "   Provided: $ENV"
+          exit 1
+        fi
+
+        # Validate ALB priority
+        if ! [[ "$PRIORITY" =~ ^[0-9]+$ ]] || [ "$PRIORITY" -lt 1 ] || [ "$PRIORITY" -gt 50000 ]; then
+          echo "❌ Error: ALB priority must be a number between 1 and 50000"
+          echo "   Provided: $PRIORITY"
+          exit 1
+        fi
+
+        # Set environment-specific variables
+        case "$ENV" in
+          dev)
+            DOMAIN_SUFFIX="wpdev.kimmyai.io"
+            AWS_PROFILE="Tebogo-dev"
+            ;;
+          sit)
+            DOMAIN_SUFFIX="wpsit.kimmyai.io"
+            AWS_PROFILE="Tebogo-sit"
+            ;;
+          prod)
+            DOMAIN_SUFFIX="wp.kimmyai.io"
+            AWS_PROFILE="Tebogo-prod"
+            ;;
+        esac
+
+        # Generate domain name
+        DOMAIN="${TENANT}.${DOMAIN_SUFFIX}"
+
+        # Set outputs
+        echo "domain_name=${DOMAIN}" >> $GITHUB_OUTPUT
+        echo "aws_profile=${AWS_PROFILE}" >> $GITHUB_OUTPUT
+        echo "domain_suffix=${DOMAIN_SUFFIX}" >> $GITHUB_OUTPUT
+
+        # Display summary
+        echo "✅ Validation passed:"
+        echo "   - Tenant: $TENANT"
+        echo "   - Environment: $ENV"
+        echo "   - Domain: $DOMAIN"
+        echo "   - ALB Priority: $PRIORITY"
+        echo "   - AWS Profile: $AWS_PROFILE"

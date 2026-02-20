@@ -1,0 +1,17 @@
+# Exclude from Docker build
+tests/
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+.git/
+.gitignore
+README.md
+.env
+*.md

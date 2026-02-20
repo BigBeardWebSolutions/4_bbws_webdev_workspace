@@ -1,0 +1,341 @@
+{
+  "report_date": "2025-12-21T14:52:17.953793",
+  "analysis_period": {
+    "start": "2025-12-14",
+    "end": "2025-12-21",
+    "days": 7
+  },
+  "environments": {
+    "dev": {
+      "environment": "DEV",
+      "total_cost": 45.999995577600004,
+      "daily_costs": [
+        {
+          "date": "2025-12-14",
+          "cost": 45.9999993924
+        },
+        {
+          "date": "2025-12-15",
+          "cost": -6.056999999978259e-07
+        },
+        {
+          "date": "2025-12-16",
+          "cost": -6.156000000419409e-07
+        },
+        {
+          "date": "2025-12-17",
+          "cost": -6.914000001367663e-07
+        },
+        {
+          "date": "2025-12-18",
+          "cost": -7.086000001722799e-07
+        },
+        {
+          "date": "2025-12-19",
+          "cost": -6.819999997276593e-07
+        },
+        {
+          "date": "2025-12-20",
+          "cost": -5.11500000017956e-07
+        }
+      ],
+      "top_services": [
+        [
+          "Amazon Registrar",
+          40.0
+        ],
+        [
+          "Tax",
+          6.0
+        ],
+        [
+          "AWS Data Transfer",
+          -4.7274591328
+        ],
+        [
+          "Amazon Elastic Container Service",
+          2.4136039457000003
+        ],
+        [
+          "EC2 - Other",
+          2.3136924763
+        ],
+        [
+          "Amazon Elastic Load Balancing",
+          0.0001310183
+        ],
+        [
+          "Amazon Simple Storage Service",
+          3.11648e-05
+        ],
+        [
+          "AWS WAF",
+          -3.5478e-06
+        ],
+        [
+          "AWS Key Management Service",
+          -6.4e-07
+        ],
+        [
+          "AWS Lambda",
+          5.248e-07
+        ]
+      ],
+      "service_totals": {
+        "AWS App Runner": 0.0,
+        "AWS Backup": -8.199999999999999e-08,
+        "AWS CloudTrail": 0.0,
+        "AWS Config": 0.0,
+        "AWS Cost Explorer": 0.0,
+        "AWS Data Transfer": -4.7274591328,
+        "AWS Glue": 0.0,
+        "AWS Key Management Service": -6.4e-07,
+        "AWS Lambda": 5.248e-07,
+        "AWS Secrets Manager": -1.382e-07,
+        "AWS Security Hub": 0.0,
+        "AWS WAF": -3.5478e-06,
+        "Amazon CloudFront": -3.9999999999999996e-10,
+        "Amazon DynamoDB": -1.2099999999999999e-08,
+        "Amazon EC2 Container Registry (ECR)": -1.28e-08,
+        "EC2 - Other": 2.3136924763,
+        "Amazon Elastic Compute Cloud - Compute": 0.0,
+        "Amazon Elastic Container Service": 2.4136039457000003,
+        "Amazon Elastic File System": -3.4999999999999995e-09,
+        "Amazon Elastic Load Balancing": 0.0001310183,
+        "Amazon GuardDuty": 1.4399999999999998e-08,
+        "Amazon Inspector": 1e-10,
+        "Amazon Location Service": 0.0,
+        "Amazon Registrar": 40.0,
+        "Amazon Relational Database Service": 2.09e-08,
+        "Amazon Route 53": 0.0,
+        "Amazon Simple Notification Service": 0.0,
+        "Amazon Simple Queue Service": 0.0,
+        "Amazon Simple Storage Service": 3.11648e-05,
+        "Amazon Virtual Private Cloud": -1e-10,
+        "AmazonCloudWatch": -1.8000000000000002e-08,
+        "Tax": 6.0,
+        "Amazon Cognito": 0.0,
+        "Amazon Simple Email Service": 0.0,
+        "AWS Certificate Manager": 0.0
+      }
+    },
+    "sit": {
+      "environment": "SIT",
+      "total_cost": 4.43000000883941e-08,
+      "daily_costs": [
+        {
+          "date": "2025-12-14",
+          "cost": 1.9799999994358008e-08
+        },
+        {
+          "date": "2025-12-15",
+          "cost": 3.6300000000265876e-08
+        },
+        {
+          "date": "2025-12-16",
+          "cost": 5.1299999999134216e-08
+        },
+        {
+          "date": "2025-12-17",
+          "cost": -9.49999999973144e-09
+        },
+        {
+          "date": "2025-12-18",
+          "cost": 3.349999999950595e-08
+        },
+        {
+          "date": "2025-12-19",
+          "cost": -6.3700000016838e-08
+        },
+        {
+          "date": "2025-12-20",
+          "cost": -2.3400000002180628e-08
+        }
+      ],
+      "top_services": [
+        [
+          "AWS Data Transfer",
+          -0.7682613501
+        ],
+        [
+          "Amazon Elastic Container Service",
+          0.4028564813
+        ],
+        [
+          "EC2 - Other",
+          0.36539056880000004
+        ],
+        [
+          "Amazon Elastic Load Balancing",
+          1.3022e-05
+        ],
+        [
+          "Amazon Simple Storage Service",
+          1.2625999999999998e-06
+        ],
+        [
+          "AWS Key Management Service",
+          2.0399999999999997e-07
+        ],
+        [
+          "Amazon Detective",
+          -1.152e-07
+        ],
+        [
+          "AWS Secrets Manager",
+          1.0869999999999999e-07
+        ],
+        [
+          "Amazon DynamoDB",
+          -7.11e-08
+        ],
+        [
+          "AmazonCloudWatch",
+          -6.460000000000001e-08
+        ]
+      ],
+      "service_totals": {
+        "AWS App Runner": 0.0,
+        "AWS CloudTrail": 0.0,
+        "AWS Config": 0.0,
+        "AWS Cost Explorer": 0.0,
+        "AWS Data Transfer": -0.7682613501,
+        "AWS Glue": 0.0,
+        "AWS Key Management Service": 2.0399999999999997e-07,
+        "AWS Lambda": 0.0,
+        "AWS Secrets Manager": 1.0869999999999999e-07,
+        "AWS Security Hub": 0.0,
+        "Amazon CloudFront": -9.999999999999998e-11,
+        "Amazon Detective": -1.152e-07,
+        "Amazon DynamoDB": -7.11e-08,
+        "Amazon EC2 Container Registry (ECR)": 1.4e-09,
+        "EC2 - Other": 0.36539056880000004,
+        "Amazon Elastic Compute Cloud - Compute": 0.0,
+        "Amazon Elastic Container Service": 0.4028564813,
+        "Amazon Elastic File System": -7e-09,
+        "Amazon Elastic Load Balancing": 1.3022e-05,
+        "Amazon GuardDuty": -4.400000000000001e-09,
+        "Amazon Inspector": 0.0,
+        "Amazon Location Service": 0.0,
+        "Amazon Relational Database Service": 8e-09,
+        "Amazon Route 53": 0.0,
+        "Amazon Simple Notification Service": 0.0,
+        "Amazon Simple Queue Service": 0.0,
+        "Amazon Simple Storage Service": 1.2625999999999998e-06,
+        "Amazon Virtual Private Cloud": 0.0,
+        "AmazonCloudWatch": -6.460000000000001e-08,
+        "AWS Certificate Manager": 0.0,
+        "AWS Step Functions": 0.0
+      }
+    },
+    "prod": {
+      "environment": "PROD",
+      "total_cost": 9.2000000508,
+      "daily_costs": [
+        {
+          "date": "2025-12-14",
+          "cost": -2.380000000000018e-08
+        },
+        {
+          "date": "2025-12-15",
+          "cost": -2.399999999942056e-08
+        },
+        {
+          "date": "2025-12-16",
+          "cost": -1.9400000013037685e-08
+        },
+        {
+          "date": "2025-12-17",
+          "cost": 3.73000000609281e-08
+        },
+        {
+          "date": "2025-12-18",
+          "cost": 3.349999999173751e-08
+        },
+        {
+          "date": "2025-12-19",
+          "cost": 2.8800000077433806e-08
+        },
+        {
+          "date": "2025-12-20",
+          "cost": 9.200000018399999
+        }
+      ],
+      "top_services": [
+        [
+          "Amazon Registrar",
+          8.0
+        ],
+        [
+          "AWS Data Transfer",
+          -1.662522724
+        ],
+        [
+          "Tax",
+          1.2
+        ],
+        [
+          "EC2 - Other",
+          0.8480192934
+        ],
+        [
+          "Amazon Elastic Container Service",
+          0.814303657
+        ],
+        [
+          "Amazon Elastic Load Balancing",
+          0.0001257145
+        ],
+        [
+          "AWS Lambda",
+          5.698799999999999e-05
+        ],
+        [
+          "Amazon Simple Storage Service",
+          1.71447e-05
+        ],
+        [
+          "Amazon DynamoDB",
+          -1.9039999999999998e-07
+        ],
+        [
+          "AWS Secrets Manager",
+          1.1569999999999998e-07
+        ]
+      ],
+      "service_totals": {
+        "AWS CloudTrail": 0.0,
+        "AWS Cost Explorer": 0.0,
+        "AWS Data Transfer": -1.662522724,
+        "AWS Glue": 0.0,
+        "AWS Key Management Service": 0.0,
+        "AWS Lambda": 5.698799999999999e-05,
+        "AWS Secrets Manager": 1.1569999999999998e-07,
+        "AWS Security Hub": 0.0,
+        "Amazon CloudFront": 3e-10,
+        "Amazon DynamoDB": -1.9039999999999998e-07,
+        "Amazon Location Service": 0.0,
+        "Amazon Route 53": 0.0,
+        "Amazon Simple Notification Service": 0.0,
+        "Amazon Simple Queue Service": 0.0,
+        "Amazon Simple Storage Service": 1.71447e-05,
+        "AmazonCloudWatch": 5.7300000000000004e-08,
+        "AWS Config": 0.0,
+        "EC2 - Other": 0.8480192934,
+        "Amazon Elastic Compute Cloud - Compute": 0.0,
+        "Amazon Elastic Container Service": 0.814303657,
+        "Amazon Elastic File System": -1.84e-08,
+        "Amazon Elastic Load Balancing": 0.0001257145,
+        "Amazon Relational Database Service": 1.9400000000000002e-08,
+        "Amazon Virtual Private Cloud": 0.0,
+        "AWS Certificate Manager": 0.0,
+        "Amazon EC2 Container Registry (ECR)": -6.7000000000000004e-09,
+        "Amazon API Gateway": 0.0,
+        "Amazon Simple Email Service": 0.0,
+        "AWS Step Functions": 0.0,
+        "Amazon Registrar": 8.0,
+        "Tax": 1.2
+      }
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+    "family": "dev-managedis",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "512",
+    "memory": "1024",
+    "executionRoleArn": "arn:aws:iam::536580886816:role/dev-ecs-task-execution-role",
+    "taskRoleArn": "arn:aws:iam::536580886816:role/dev-ecs-task-role",
+    "containerDefinitions": [
+        {
+            "name": "wordpress",
+            "image": "536580886816.dkr.ecr.eu-west-1.amazonaws.com/dev-wordpress:latest",
+            "essential": true,
+            "portMappings": [
+                {
+                    "containerPort": 80,
+                    "protocol": "tcp"
+                }
+            ],
+            "environment": [
+                {"name": "WORDPRESS_DB_HOST", "value": "dev-mysql.c9ko42mci6mt.eu-west-1.rds.amazonaws.com"},
+                {"name": "WORDPRESS_DB_NAME", "value": "managedis_db"},
+                {"name": "WORDPRESS_TABLE_PREFIX", "value": "wp_"},
+                {"name": "WP_ENV", "value": "dev"},
+                {"name": "TEST_EMAIL_REDIRECT", "value": "tebogo@bigbeard.co.za"},
+                {"name": "PHP_MEMORY_LIMIT", "value": "512M"},
+                {"name": "PHP_MAX_EXECUTION_TIME", "value": "600"},
+                {"name": "PHP_POST_MAX_SIZE", "value": "512M"},
+                {"name": "PHP_UPLOAD_MAX_FILESIZE", "value": "512M"},
+                {"name": "WORDPRESS_CONFIG_EXTRA", "value": "if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; } if (isset($_SERVER['HTTP_CLOUDFRONT_FORWARDED_PROTO']) && $_SERVER['HTTP_CLOUDFRONT_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; } define('FORCE_SSL_ADMIN', true); define('WP_HOME', 'https://managedis.wpdev.kimmyai.io'); define('WP_SITEURL', 'https://managedis.wpdev.kimmyai.io'); define('WP_ENV', 'dev'); define('TEST_EMAIL_REDIRECT', 'tebogo@bigbeard.co.za');"}
+            ],
+            "secrets": [
+                {"name": "WORDPRESS_DB_USER", "valueFrom": "arn:aws:secretsmanager:eu-west-1:536580886816:secret:dev-managedis-db-credentials-SAhrYL:username::"},
+                {"name": "WORDPRESS_DB_PASSWORD", "valueFrom": "arn:aws:secretsmanager:eu-west-1:536580886816:secret:dev-managedis-db-credentials-SAhrYL:password::"}
+            ],
+            "mountPoints": [
+                {
+                    "sourceVolume": "wp-content",
+                    "containerPath": "/var/www/html/wp-content",
+                    "readOnly": false
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/dev",
+                    "awslogs-region": "eu-west-1",
+                    "awslogs-stream-prefix": "managedis"
+                }
+            }
+        }
+    ],
+    "volumes": [
+        {
+            "name": "wp-content",
+            "efsVolumeConfiguration": {
+                "fileSystemId": "fs-0e1cccd971a35db46",
+                "transitEncryption": "ENABLED",
+                "authorizationConfig": {
+                    "accessPointId": "fsap-0d8fcbe088149fdfb",
+                    "iam": "ENABLED"
+                }
+            }
+        }
+    ],
+    "tags": [
+        {"key": "Name", "value": "dev-managedis-task"},
+        {"key": "Environment", "value": "dev"},
+        {"key": "Tenant", "value": "managedis"}
+    ]
+}

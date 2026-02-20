@@ -1,0 +1,15 @@
+# Exclude tests and development files from Lambda package
+tests/
+*.pyc
+__pycache__/
+*.pytest_cache/
+.coverage
+htmlcov/
+.git/
+.gitignore
+README.md
+*.md
+.env
+.venv/
+venv/
+*.egg-info/

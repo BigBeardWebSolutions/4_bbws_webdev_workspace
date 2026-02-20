@@ -1,0 +1,700 @@
+openapi: 3.0.3
+info:
+  title: BBWS WordPress Site Management API
+  description: |
+    Self-service API for customers to create, configure, and manage WordPress sites
+    including templates, plugins, and environment promotion (DEV → SIT → PROD).
+
+    **BRS Reference**: BRS 2.6
+    **HLD Reference**: 2.6_HLD_WordPress_Site_Management.md
+  version: 1.0.0
+  contact:
+    name: BBWS Platform Team
+    email: platform@kimmyai.io
+
+servers:
+  - url: https://dev.api.kimmyai.io/v1.0
+    description: Development
+  - url: https://sit.api.kimmyai.io/v1.0
+    description: System Integration Testing
+  - url: https://api.kimmyai.io/v1.0
+    description: Production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Sites
+    description: WordPress site lifecycle management
+  - name: Templates
+    description: Template marketplace and application
+  - name: Plugins
+    description: Plugin marketplace and installation
+  - name: Operations
+    description: Async operation tracking
+
+paths:
+  /tenants/{tenantId}/sites:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    get:
+      tags: [Sites]
+      summary: List sites
+      description: List all WordPress sites for a tenant (paginated)
+      operationId: listSites
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/StartAt'
+        - name: environment
+          in: query
+          schema:
+            type: string
+            enum: [DEV, SIT, PROD]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [CREATING, ACTIVE, SUSPENDED, DELETED]
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteListResponse'
+
+    post:
+      tags: [Sites]
+      summary: Create new site
+      description: Create a new WordPress site (sync operation)
+      operationId: createSite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSiteRequest'
+      responses:
+        '201':
+          description: Site created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /tenants/{tenantId}/sites/{siteId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/SiteId'
+
+    get:
+      tags: [Sites]
+      summary: Get site details
+      operationId: getSite
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [Sites]
+      summary: Update site settings
+      operationId: updateSite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSiteRequest'
+      responses:
+        '200':
+          description: Site updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+
+    delete:
+      tags: [Sites]
+      summary: Delete site
+      operationId: deleteSite
+      responses:
+        '204':
+          description: Site deleted
+
+  /tenants/{tenantId}/sites/{siteId}/clone:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/SiteId'
+
+    post:
+      tags: [Sites]
+      summary: Clone site
+      description: Create a copy of the site (async operation)
+      operationId: cloneSite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneSiteRequest'
+      responses:
+        '202':
+          description: Clone operation initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/sites/{siteId}/promote:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/SiteId'
+
+    post:
+      tags: [Sites]
+      summary: Promote site to next environment
+      description: Promote site DEV→SIT or SIT→PROD (async operation)
+      operationId: promoteSite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromoteSiteRequest'
+      responses:
+        '202':
+          description: Promotion operation initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /templates:
+    get:
+      tags: [Templates]
+      summary: Browse template marketplace
+      description: List available templates (paginated)
+      operationId: listTemplates
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/StartAt'
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [business, portfolio, ecommerce, blog, landing]
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+
+  /templates/{templateId}:
+    parameters:
+      - $ref: '#/components/parameters/TemplateId'
+
+    get:
+      tags: [Templates]
+      summary: Get template details
+      operationId: getTemplate
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+
+  /tenants/{tenantId}/sites/{siteId}/templates/apply:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/SiteId'
+
+    post:
+      tags: [Templates]
+      summary: Apply template to site
+      description: Apply a template to the site (async operation)
+      operationId: applyTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyTemplateRequest'
+      responses:
+        '202':
+          description: Template application initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/sites/{siteId}/templates/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/SiteId'
+
+    post:
+      tags: [Templates]
+      summary: Preview template on site
+      operationId: previewTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewTemplateRequest'
+      responses:
+        '202':
+          description: Preview initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/plugins:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    get:
+      tags: [Plugins]
+      summary: Browse approved plugins
+      description: List approved plugins available for installation
+      operationId: listAvailablePlugins
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/StartAt'
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginListResponse'
+
+    post:
+      tags: [Plugins]
+      summary: Install plugin
+      description: Install a plugin to the site (async operation)
+      operationId: installPlugin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallPluginRequest'
+      responses:
+        '202':
+          description: Installation initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/plugins/{pluginId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/PluginId'
+
+    get:
+      tags: [Plugins]
+      summary: Get plugin details
+      operationId: getPlugin
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plugin'
+
+    delete:
+      tags: [Plugins]
+      summary: Uninstall plugin
+      operationId: uninstallPlugin
+      responses:
+        '204':
+          description: Plugin uninstalled
+
+  /tenants/{tenantId}/{pluginId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/PluginId'
+
+    post:
+      tags: [Plugins]
+      summary: Activate plugin
+      operationId: activatePlugin
+      responses:
+        '200':
+          description: Plugin activated
+
+  /tenants/{tenantId}/{pluginId}/deactivate:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/PluginId'
+
+    post:
+      tags: [Plugins]
+      summary: Deactivate plugin
+      operationId: deactivatePlugin
+      responses:
+        '200':
+          description: Plugin deactivated
+
+  /operations/{operationId}:
+    parameters:
+      - $ref: '#/components/parameters/OperationId'
+
+    get:
+      tags: [Operations]
+      summary: Get operation status
+      description: Track async operation progress
+      operationId: getOperation
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+  /tenants/{tenantId}/operations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    get:
+      tags: [Operations]
+      summary: List tenant operations
+      description: List async operations for a tenant (paginated)
+      operationId: listTenantOperations
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/StartAt'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationListResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique tenant identifier
+
+    SiteId:
+      name: siteId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique site identifier
+
+    TemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique template identifier
+
+    PluginId:
+      name: pluginId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique plugin identifier
+
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique operation identifier
+
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+
+    StartAt:
+      name: startAt
+      in: query
+      schema:
+        type: string
+      description: Pagination cursor
+
+  schemas:
+    Site:
+      type: object
+      properties:
+        siteId:
+          type: string
+        name:
+          type: string
+        domain:
+          type: string
+        environment:
+          type: string
+          enum: [DEV, SIT, PROD]
+        status:
+          type: string
+          enum: [CREATING, ACTIVE, SUSPENDED, PROMOTING, DELETED]
+        templateId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        _links:
+          type: object
+
+    SiteListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Site'
+        nextToken:
+          type: string
+        count:
+          type: integer
+
+    CreateSiteRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        domain:
+          type: string
+        templateId:
+          type: string
+        environment:
+          type: string
+          enum: [DEV, SIT, PROD]
+          default: DEV
+
+    UpdateSiteRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        domain:
+          type: string
+
+    CloneSiteRequest:
+      type: object
+      required:
+        - targetName
+      properties:
+        targetName:
+          type: string
+        targetEnvironment:
+          type: string
+          enum: [DEV, SIT, PROD]
+
+    PromoteSiteRequest:
+      type: object
+      required:
+        - targetEnvironment
+      properties:
+        targetEnvironment:
+          type: string
+          enum: [SIT, PROD]
+        notes:
+          type: string
+
+    Template:
+      type: object
+      properties:
+        templateId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        thumbnail:
+          type: string
+          format: uri
+        previewUrl:
+          type: string
+          format: uri
+        isPremium:
+          type: boolean
+
+    TemplateListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Template'
+        nextToken:
+          type: string
+
+    ApplyTemplateRequest:
+      type: object
+      required:
+        - templateId
+      properties:
+        templateId:
+          type: string
+
+    PreviewTemplateRequest:
+      type: object
+      required:
+        - templateId
+      properties:
+        templateId:
+          type: string
+
+    Plugin:
+      type: object
+      properties:
+        pluginId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        category:
+          type: string
+        isApproved:
+          type: boolean
+        isInstalled:
+          type: boolean
+        isActive:
+          type: boolean
+
+    PluginListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plugin'
+        nextToken:
+          type: string
+
+    InstallPluginRequest:
+      type: object
+      required:
+        - pluginId
+        - siteId
+      properties:
+        pluginId:
+          type: string
+        siteId:
+          type: string
+
+    Operation:
+      type: object
+      properties:
+        operationId:
+          type: string
+        type:
+          type: string
+          enum: [CLONE, PROMOTE, TEMPLATE_APPLY, PLUGIN_INSTALL, PLUGIN_UPDATE]
+        status:
+          type: string
+          enum: [PENDING, IN_PROGRESS, COMPLETED, FAILED]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
+    OperationResponse:
+      type: object
+      properties:
+        operationId:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+
+    OperationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Operation'
+        nextToken:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

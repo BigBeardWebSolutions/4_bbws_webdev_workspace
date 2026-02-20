@@ -1,0 +1,557 @@
+openapi: 3.0.3
+info:
+  title: BBWS WordPress Instance Management API
+  description: |
+    Internal/operator-facing API for provisioning, managing, and retiring dedicated
+    WordPress environments for each customer organization. Transforms manual 2+ hour
+    provisioning into automated 15-minute onboarding.
+
+    **BRS Reference**: BRS 2.7
+    **HLD Reference**: 2.7_HLD_WordPress_Instance_Management.md
+    **LLD Reference**: 2.7_LLD_WordPress_Instance_Management.md
+
+    **Note**: This API is for Platform Operators only. Customers use the Site Management API (BRS 2.6).
+  version: 1.0.0
+  contact:
+    name: BBWS Platform Team
+    email: platform@kimmyai.io
+
+servers:
+  - url: https://dev.api.kimmyai.io/v1.0
+    description: Development
+  - url: https://sit.api.kimmyai.io/v1.0
+    description: System Integration Testing
+  - url: https://api.kimmyai.io/v1.0
+    description: Production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Instances
+    description: Instance provisioning and status
+  - name: Lifecycle
+    description: Instance lifecycle operations (suspend, resume, scale)
+  - name: Identity
+    description: Cognito tenant pool configuration
+  - name: Operations
+    description: Async operation tracking
+
+paths:
+  /tenants/{tenantId}/instance/provision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Instances]
+      summary: Provision new instance
+      description: |
+        Provision a new WordPress instance for the tenant. This creates:
+        - Cognito tenant user pool
+        - EFS access point
+        - RDS schema
+        - ECS task definition and service
+        - ALB target group routing
+
+        **Async operation** - returns operationId for tracking.
+      operationId: provisionInstance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvisionInstanceRequest'
+      responses:
+        '202':
+          description: Provisioning initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Instance already exists for tenant
+
+  /tenants/{tenantId}/instance:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    get:
+      tags: [Instances]
+      summary: Get instance status
+      description: Get current status of the tenant's WordPress instance
+      operationId: getInstanceStatus
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Instance'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenantId}/instance/deprovision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Instances]
+      summary: Deprovision instance
+      description: |
+        Completely remove the tenant's WordPress instance. This removes:
+        - ECS service and task
+        - ALB target group
+        - Archives data before deletion
+
+        **Async operation** - returns operationId for tracking.
+      operationId: deprovisionInstance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeprovisionRequest'
+      responses:
+        '202':
+          description: Deprovisioning initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/instance/lifecycle/suspend:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Lifecycle]
+      summary: Suspend instance
+      description: |
+        Suspend instance by scaling ECS service to 0. Data is preserved.
+        Customer cannot access WordPress until resumed.
+
+        **Async operation**
+      operationId: suspendInstance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuspendRequest'
+      responses:
+        '202':
+          description: Suspension initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/instance/lifecycle/resume:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Lifecycle]
+      summary: Resume instance
+      description: |
+        Resume suspended instance by scaling ECS service back up.
+
+        **Async operation**
+      operationId: resumeInstance
+      responses:
+        '202':
+          description: Resume initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/instance/lifecycle/scale:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Lifecycle]
+      summary: Scale instance
+      description: |
+        Scale instance resources up or down.
+
+        **Async operation**
+      operationId: scaleInstance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScaleRequest'
+      responses:
+        '202':
+          description: Scaling initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/instance/lifecycle/update:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Lifecycle]
+      summary: Rolling update
+      description: |
+        Perform rolling update to new WordPress container image.
+
+        **Async operation**
+      operationId: updateInstance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRequest'
+      responses:
+        '202':
+          description: Update initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/instance/identity:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    get:
+      tags: [Identity]
+      summary: Get Cognito configuration
+      description: Get tenant's Cognito user pool configuration
+      operationId: getIdentityConfig
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityConfig'
+
+  /tenants/{tenantId}/instance/identity/configure:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Identity]
+      summary: Configure Cognito pool
+      description: |
+        Configure tenant's Cognito user pool settings.
+
+        **Async operation**
+      operationId: configureIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigureIdentityRequest'
+      responses:
+        '202':
+          description: Configuration initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /operations/{operationId}:
+    parameters:
+      - $ref: '#/components/parameters/OperationId'
+
+    get:
+      tags: [Operations]
+      summary: Get operation status
+      description: Track async operation progress
+      operationId: getOperation
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Platform Operator JWT from Admin Cognito Pool
+
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^tenant-[a-f0-9-]{36}$'
+      description: Unique tenant identifier
+
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique operation identifier
+
+  schemas:
+    Instance:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        status:
+          type: string
+          enum:
+            - PENDING_PROVISIONING
+            - PROVISIONING
+            - ACTIVE
+            - SUSPENDED
+            - PENDING_DEPRO
+            - DEPROVISIONED
+        environment:
+          type: string
+          enum: [DEV, SIT, PROD]
+        ecsService:
+          type: string
+          description: ECS service ARN
+        efsAccessPoint:
+          type: string
+          description: EFS access point ARN
+        rdsSchema:
+          type: string
+          description: RDS schema name
+        cognitoPoolId:
+          type: string
+          description: Cognito user pool ID
+        wordpressVersion:
+          type: string
+        containerImage:
+          type: string
+        desiredCount:
+          type: integer
+        runningCount:
+          type: integer
+        healthStatus:
+          type: string
+          enum: [HEALTHY, UNHEALTHY, UNKNOWN]
+        provisionedAt:
+          type: string
+          format: date-time
+        lastUpdatedAt:
+          type: string
+          format: date-time
+        _links:
+          type: object
+
+    ProvisionInstanceRequest:
+      type: object
+      required:
+        - plan
+      properties:
+        plan:
+          type: string
+          enum: [STARTER, PROFESSIONAL, ENTERPRISE]
+          description: Subscription plan determining resources
+        environment:
+          type: string
+          enum: [DEV, SIT, PROD]
+          default: DEV
+        wordpressVersion:
+          type: string
+          default: "6.4"
+        desiredCount:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+
+    DeprovisionRequest:
+      type: object
+      properties:
+        archiveData:
+          type: boolean
+          default: true
+          description: Archive customer data before deletion
+        reason:
+          type: string
+          description: Reason for deprovisioning
+
+    SuspendRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 10
+          description: Reason for suspension (e.g., non-payment)
+
+    ScaleRequest:
+      type: object
+      required:
+        - desiredCount
+      properties:
+        desiredCount:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: Desired number of ECS tasks
+
+    UpdateRequest:
+      type: object
+      properties:
+        containerImage:
+          type: string
+          description: New container image to deploy
+        wordpressVersion:
+          type: string
+          description: New WordPress version
+
+    IdentityConfig:
+      type: object
+      properties:
+        userPoolId:
+          type: string
+        userPoolArn:
+          type: string
+        clientId:
+          type: string
+        domain:
+          type: string
+        passwordPolicy:
+          type: object
+          properties:
+            minimumLength:
+              type: integer
+            requireUppercase:
+              type: boolean
+            requireLowercase:
+              type: boolean
+            requireNumbers:
+              type: boolean
+            requireSymbols:
+              type: boolean
+        mfaConfiguration:
+          type: string
+          enum: [OFF, OPTIONAL, REQUIRED]
+
+    ConfigureIdentityRequest:
+      type: object
+      properties:
+        passwordPolicy:
+          type: object
+          properties:
+            minimumLength:
+              type: integer
+              minimum: 8
+              maximum: 99
+            requireUppercase:
+              type: boolean
+            requireLowercase:
+              type: boolean
+            requireNumbers:
+              type: boolean
+            requireSymbols:
+              type: boolean
+        mfaConfiguration:
+          type: string
+          enum: [OFF, OPTIONAL, REQUIRED]
+
+    Operation:
+      type: object
+      properties:
+        operationId:
+          type: string
+        tenantId:
+          type: string
+        type:
+          type: string
+          enum:
+            - PROVISION
+            - DEPROVISION
+            - SUSPEND
+            - RESUME
+            - SCALE
+            - UPDATE
+            - CONFIGURE_IDENTITY
+        status:
+          type: string
+          enum: [PENDING, IN_PROGRESS, COMPLETED, FAILED, ROLLED_BACK]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        currentStep:
+          type: string
+          description: Current step in the workflow
+        message:
+          type: string
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
+    OperationResponse:
+      type: object
+      properties:
+        operationId:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+        _links:
+          type: object
+          properties:
+            self:
+              type: object
+              properties:
+                href:
+                  type: string
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

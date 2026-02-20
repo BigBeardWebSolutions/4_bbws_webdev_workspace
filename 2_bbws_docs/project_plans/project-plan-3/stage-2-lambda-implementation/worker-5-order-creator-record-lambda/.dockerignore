@@ -1,0 +1,37 @@
+# Exclude test files and development artifacts from Lambda package
+
+# Tests
+tests/
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.*
+venv/
+env/

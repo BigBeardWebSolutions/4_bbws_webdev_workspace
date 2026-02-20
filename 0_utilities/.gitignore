@@ -1,0 +1,101 @@
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform.lock.hcl
+*.tfplan
+terraform.tfvars.backup
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+
+# AWS Credentials
+*.pem
+*.key
+credentials.json
+
+# Outputs
+outputs.json
+*.json.backup
+
+# Claude workflow
+.claude/
+
+# S3 bucket staging/sync directories (deployment artifacts)
+website_extractor/bigbeard-migrated-site-*/
+
+# Extracted website folders (deployment artifacts - DO NOT COMMIT)
+website_extractor/website-migrator/scripts/barno/
+website_extractor/website-migrator/scripts/euroconcepts/
+website_extractor/website-migrator/scripts/northpinebaptist/
+website_extractor/website-migrator/scripts/bullockbeans/
+website_extractor/website-migrator/scripts/schroderandassociates/
+website_extractor/website-migrator/scripts/manufacturing_websites/
+website_extractor/website-migrator/scripts/*/
+!website_extractor/website-migrator/scripts/*.py
+!website_extractor/website-migrator/scripts/*.sh
+!website_extractor/website-migrator/scripts/*.md
+!website_extractor/website-migrator/scripts/.claude/
+
+# WordPress uploads and multimedia assets (stored in S3, not Git)
+website_extractor/website-migrator/extracted_sites/*/wp-content/uploads/
+website_extractor/website-migrator/extracted_sites/**/wp-content/uploads/
+
+# Large multimedia files (images, videos, fonts stored in S3)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.svg
+*.pdf
+*.mp4
+*.mp3
+*.wav
+*.woff
+*.woff2
+*.ttf
+*.eot
+*.otf
+*.zip
+*.tar.gz
+
+# Exception: Keep small images in themes/plugins (icons, logos < 50KB typically tracked)
+!website_extractor/website-migrator/extracted_sites/**/themes/**/images/
+!website_extractor/website-migrator/extracted_sites/**/plugins/**/images/
+!website_extractor/website-migrator/extracted_sites/**/plugins/**/assets/

@@ -1,0 +1,352 @@
+# ============================================================================
+# DEV DEPLOYMENT WORKFLOW - Simple Deploy & Validate
+# ============================================================================
+# Purpose: Deploy infrastructure to DEV and validate resources are created
+# Trigger: Manual workflow dispatch
+# Environment: DEV only (536580886816 / eu-west-1)
+# No approval gates - instant deployment for rapid testing
+# ============================================================================
+
+name: Deploy to DEV
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Component to deploy'
+        type: choice
+        required: true
+        options:
+          - dynamodb
+          - s3
+          - both
+      skip_validation:
+        description: 'Skip post-deployment validation'
+        type: boolean
+        required: false
+        default: false
+
+# Permissions for OIDC authentication
+permissions:
+  id-token: write    # Required for AWS OIDC authentication
+  contents: read     # Required to checkout code
+  actions: read      # Required for artifacts
+
+env:
+  AWS_REGION: eu-west-1
+  AWS_ACCOUNT_ID: '536580886816'
+  ENVIRONMENT: dev
+  TF_VERSION: 1.6.0
+
+jobs:
+  # --------------------------------------------------------------------------
+  # JOB 1: DEPLOY DYNAMODB
+  # --------------------------------------------------------------------------
+  deploy-dynamodb:
+    name: Deploy DynamoDB Tables
+    runs-on: ubuntu-latest
+    if: github.event.inputs.component == 'dynamodb' || github.event.inputs.component == 'both'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------------------------
+      # AWS OIDC AUTHENTICATION
+      # --------------------------------------------------------------------------
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-deploy-dev
+
+      - name: Verify AWS identity
+        run: |
+          echo "=================================================="
+          echo "AWS IDENTITY VERIFICATION"
+          echo "=================================================="
+          echo "Account ID: $(aws sts get-caller-identity --query Account --output text)"
+          echo "Region: ${{ env.AWS_REGION }}"
+          echo "User ARN: $(aws sts get-caller-identity --query Arn --output text)"
+          echo "=================================================="
+
+      # --------------------------------------------------------------------------
+      # TERRAFORM SETUP
+      # --------------------------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform init (DynamoDB)
+        working-directory: terraform/dynamodb
+        run: |
+          terraform init \
+            -backend-config="bucket=bbws-terraform-state-dev" \
+            -backend-config="key=2_1_bbws_dynamodb_schemas/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=terraform-state-lock-dev" \
+            -backend-config="encrypt=true"
+
+      # --------------------------------------------------------------------------
+      # TERRAFORM PLAN
+      # --------------------------------------------------------------------------
+      - name: Terraform plan (DynamoDB)
+        id: plan_dynamodb
+        working-directory: terraform/dynamodb
+        run: |
+          terraform plan \
+            -var-file=environments/dev.tfvars \
+            -out=tfplan \
+            -no-color \
+            | tee plan_output.txt
+
+      - name: Display plan summary
+        working-directory: terraform/dynamodb
+        run: |
+          echo "=================================================="
+          echo "TERRAFORM PLAN SUMMARY - DynamoDB"
+          echo "=================================================="
+          grep -E "Plan:|No changes" plan_output.txt || echo "See full plan above"
+          echo "=================================================="
+
+      # --------------------------------------------------------------------------
+      # TERRAFORM APPLY
+      # --------------------------------------------------------------------------
+      - name: Terraform apply (DynamoDB)
+        working-directory: terraform/dynamodb
+        run: |
+          echo "Applying terraform plan..."
+          terraform apply -auto-approve tfplan
+
+      - name: Capture terraform outputs (DynamoDB)
+        id: outputs_dynamodb
+        working-directory: terraform/dynamodb
+        run: |
+          echo "=================================================="
+          echo "TERRAFORM OUTPUTS - DynamoDB"
+          echo "=================================================="
+          terraform output -json | tee outputs.json
+          terraform output
+          echo "=================================================="
+
+      - name: Upload deployment outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: dynamodb-deployment-outputs-${{ github.run_number }}
+          path: terraform/dynamodb/outputs.json
+          retention-days: 30
+
+  # --------------------------------------------------------------------------
+  # JOB 2: DEPLOY S3
+  # --------------------------------------------------------------------------
+  deploy-s3:
+    name: Deploy S3 Buckets
+    runs-on: ubuntu-latest
+    if: github.event.inputs.component == 's3' || github.event.inputs.component == 'both'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-deploy-dev
+
+      - name: Verify AWS identity
+        run: |
+          echo "=================================================="
+          echo "AWS IDENTITY VERIFICATION"
+          echo "=================================================="
+          echo "Account ID: $(aws sts get-caller-identity --query Account --output text)"
+          echo "Region: ${{ env.AWS_REGION }}"
+          echo "=================================================="
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform init (S3)
+        working-directory: terraform/s3
+        run: |
+          terraform init \
+            -backend-config="bucket=bbws-terraform-state-dev" \
+            -backend-config="key=2_1_bbws_s3_schemas/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=terraform-state-lock-dev" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform plan (S3)
+        id: plan_s3
+        working-directory: terraform/s3
+        run: |
+          terraform plan \
+            -var-file=environments/dev.tfvars \
+            -out=tfplan \
+            -no-color \
+            | tee plan_output.txt
+
+      - name: Display plan summary
+        working-directory: terraform/s3
+        run: |
+          echo "=================================================="
+          echo "TERRAFORM PLAN SUMMARY - S3"
+          echo "=================================================="
+          grep -E "Plan:|No changes" plan_output.txt || echo "See full plan above"
+          echo "=================================================="
+
+      - name: Terraform apply (S3)
+        working-directory: terraform/s3
+        run: |
+          echo "Applying terraform plan..."
+          terraform apply -auto-approve tfplan
+
+      - name: Capture terraform outputs (S3)
+        id: outputs_s3
+        working-directory: terraform/s3
+        run: |
+          echo "=================================================="
+          echo "TERRAFORM OUTPUTS - S3"
+          echo "=================================================="
+          terraform output -json | tee outputs.json
+          terraform output
+          echo "=================================================="
+
+      - name: Upload deployment outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-deployment-outputs-${{ github.run_number }}
+          path: terraform/s3/outputs.json
+          retention-days: 30
+
+  # --------------------------------------------------------------------------
+  # JOB 3: VALIDATE DYNAMODB DEPLOYMENT
+  # --------------------------------------------------------------------------
+  validate-dynamodb:
+    name: Validate DynamoDB Resources
+    runs-on: ubuntu-latest
+    needs: deploy-dynamodb
+    if: |
+      (github.event.inputs.component == 'dynamodb' || github.event.inputs.component == 'both') &&
+      github.event.inputs.skip_validation == false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install boto3
+
+      - name: Run DynamoDB validation script
+        run: |
+          python3 scripts/validate_dynamodb_dev.py
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "=================================================="
+          echo "✅ DYNAMODB VALIDATION SUCCESSFUL"
+          echo "=================================================="
+          echo "All DynamoDB tables deployed and validated"
+          echo "=================================================="
+
+  # --------------------------------------------------------------------------
+  # JOB 4: VALIDATE S3 DEPLOYMENT
+  # --------------------------------------------------------------------------
+  validate-s3:
+    name: Validate S3 Resources
+    runs-on: ubuntu-latest
+    needs: deploy-s3
+    if: |
+      (github.event.inputs.component == 's3' || github.event.inputs.component == 'both') &&
+      github.event.inputs.skip_validation == false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install boto3
+
+      - name: Run S3 validation script
+        run: |
+          python3 scripts/validate_s3_dev.py
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "=================================================="
+          echo "✅ S3 VALIDATION SUCCESSFUL"
+          echo "=================================================="
+          echo "All S3 buckets deployed and validated"
+          echo "=================================================="
+
+  # --------------------------------------------------------------------------
+  # JOB 5: DEPLOYMENT SUMMARY
+  # --------------------------------------------------------------------------
+  summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [deploy-dynamodb, deploy-s3, validate-dynamodb, validate-s3]
+    if: always()
+
+    steps:
+      - name: Generate deployment summary
+        run: |
+          echo "=================================================="
+          echo "DEV DEPLOYMENT SUMMARY"
+          echo "=================================================="
+          echo "Component: ${{ github.event.inputs.component }}"
+          echo "Environment: DEV"
+          echo "AWS Account: ${{ env.AWS_ACCOUNT_ID }}"
+          echo "Region: ${{ env.AWS_REGION }}"
+          echo ""
+          echo "Job Results:"
+          echo "  DynamoDB Deploy: ${{ needs.deploy-dynamodb.result || 'skipped' }}"
+          echo "  S3 Deploy: ${{ needs.deploy-s3.result || 'skipped' }}"
+          echo "  DynamoDB Validation: ${{ needs.validate-dynamodb.result || 'skipped' }}"
+          echo "  S3 Validation: ${{ needs.validate-s3.result || 'skipped' }}"
+          echo ""
+          echo "Workflow Run: ${{ github.run_id }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "=================================================="
+
+          # Check if any job failed
+          if [ "${{ needs.deploy-dynamodb.result }}" == "failure" ] || \
+             [ "${{ needs.deploy-s3.result }}" == "failure" ] || \
+             [ "${{ needs.validate-dynamodb.result }}" == "failure" ] || \
+             [ "${{ needs.validate-s3.result }}" == "failure" ]; then
+            echo "❌ DEPLOYMENT FAILED - Check job logs above"
+            exit 1
+          else
+            echo "✅ DEPLOYMENT SUCCESSFUL"
+          fi

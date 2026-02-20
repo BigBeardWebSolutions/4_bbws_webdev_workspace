@@ -1,0 +1,98 @@
+name: 'Check ALB Priority Conflict'
+description: 'Checks if the specified ALB priority conflicts with existing listener rules'
+
+inputs:
+  tenant_name:
+    description: 'Tenant name'
+    required: true
+  environment:
+    description: 'Environment (dev, sit, prod)'
+    required: true
+  alb_priority:
+    description: 'ALB listener rule priority to check'
+    required: true
+  aws_region:
+    description: 'AWS region'
+    required: true
+
+outputs:
+  conflict_found:
+    description: 'Whether a priority conflict was found (true/false)'
+    value: ${{ steps.check.outputs.conflict_found }}
+  existing_tenant:
+    description: 'Tenant name that is using the priority (if conflict found)'
+    value: ${{ steps.check.outputs.existing_tenant }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check Priority Conflict
+      id: check
+      shell: bash
+      run: |
+        ENV="${{ inputs.environment }}"
+        PRIORITY="${{ inputs.alb_priority }}"
+        TENANT="${{ inputs.tenant_name }}"
+
+        echo "🔍 Checking ALB priority conflicts..."
+        echo "   - Environment: $ENV"
+        echo "   - Priority: $PRIORITY"
+        echo "   - Tenant: $TENANT"
+
+        # Get ALB listener ARN
+        LISTENER_ARN=$(aws elbv2 describe-listeners \
+          --query "Listeners[?Port==\`80\`].ListenerArn | [0]" \
+          --output text \
+          --region ${{ inputs.aws_region }})
+
+        if [ -z "$LISTENER_ARN" ] || [ "$LISTENER_ARN" == "None" ]; then
+          echo "⚠️  Warning: Could not find ALB HTTP listener"
+          echo "conflict_found=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "   - Listener ARN: $LISTENER_ARN"
+
+        # Get all listener rules
+        RULES=$(aws elbv2 describe-rules \
+          --listener-arn "$LISTENER_ARN" \
+          --query "Rules[?Priority==\`$PRIORITY\`]" \
+          --output json \
+          --region ${{ inputs.aws_region }})
+
+        # Check if any rules use this priority
+        RULE_COUNT=$(echo "$RULES" | jq '. | length')
+
+        if [ "$RULE_COUNT" -eq 0 ]; then
+          echo "✅ No priority conflict found"
+          echo "conflict_found=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Extract tenant name from rule tags or conditions
+        EXISTING_RULE=$(echo "$RULES" | jq -r '.[0]')
+        RULE_ARN=$(echo "$EXISTING_RULE" | jq -r '.RuleArn')
+
+        # Get tags for the rule
+        TAGS=$(aws elbv2 describe-tags \
+          --resource-arns "$RULE_ARN" \
+          --query "TagDescriptions[0].Tags[?Key==\`Tenant\`].Value | [0]" \
+          --output text \
+          --region ${{ inputs.aws_region }})
+
+        if [ "$TAGS" == "$TENANT" ]; then
+          echo "✅ Priority is used by the same tenant (updating existing rule)"
+          echo "conflict_found=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Conflict found
+        echo "❌ Priority conflict detected!"
+        echo "   - Priority $PRIORITY is already in use"
+        if [ ! -z "$TAGS" ] && [ "$TAGS" != "None" ]; then
+          echo "   - Used by tenant: $TAGS"
+          echo "existing_tenant=$TAGS" >> $GITHUB_OUTPUT
+        fi
+
+        echo "conflict_found=true" >> $GITHUB_OUTPUT
+        exit 1

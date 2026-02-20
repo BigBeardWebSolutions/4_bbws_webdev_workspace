@@ -1,0 +1,319 @@
+name: Sync Website to S3 & CloudFront
+
+on:
+  # Auto-trigger on push to extracted_sites folders
+  push:
+    paths:
+      - 'website_extractor/website-migrator/extracted_sites/dev/**'
+      - 'website_extractor/website-migrator/extracted_sites/sit/**'
+      - 'website_extractor/website-migrator/extracted_sites/prod/**'
+    branches:
+      - main
+
+  # Manual trigger (still available)
+  workflow_dispatch:
+    inputs:
+      folder_name:
+        description: 'Website folder to sync (from extracted_sites directory)'
+        required: true
+        type: string
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+          - sit
+      dry_run:
+        description: 'Dry run (preview changes without executing)'
+        required: false
+        type: boolean
+        default: false
+      delete_removed:
+        description: 'Delete files from S3 that are not in local folder'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write   # Required for AWS OIDC authentication
+  contents: read    # Required to checkout repository
+
+jobs:
+  # Detect changed folders and environment
+  detect-changes:
+    name: Detect Changed Folders
+    runs-on: ubuntu-latest
+    outputs:
+      folders: ${{ steps.detect.outputs.folders }}
+      environment: ${{ steps.detect.outputs.environment }}
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit to detect changes
+
+      - name: 🔍 Detect Changed Folders
+        id: detect
+        run: |
+          # For manual trigger, use inputs
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "folders=[{\"name\":\"${{ inputs.folder_name }}\",\"env\":\"${{ inputs.environment }}\"}]" >> $GITHUB_OUTPUT
+            echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "Manual trigger: ${{ inputs.folder_name }} → ${{ inputs.environment }}"
+            exit 0
+          fi
+
+          # For push events, detect changed folders
+          echo "🔍 Detecting changed folders from git diff..."
+
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          echo ""
+
+          # Extract unique folder/environment combinations
+          FOLDERS_JSON="["
+          FIRST=true
+
+          for FILE in $CHANGED_FILES; do
+            # Check if file is in website_extractor/website-migrator/extracted_sites/{env}/{folder}/
+            if [[ $FILE =~ ^website_extractor/website-migrator/extracted_sites/(dev|sit|prod)/([^/]+)/ ]]; then
+              ENV="${BASH_REMATCH[1]}"
+              FOLDER="${BASH_REMATCH[2]}"
+
+              echo "📁 Detected change: $FOLDER (environment: $ENV)"
+
+              # Add to JSON array (avoiding duplicates with simple check)
+              if [[ $FIRST == true ]]; then
+                FOLDERS_JSON="${FOLDERS_JSON}{\"name\":\"${FOLDER}\",\"env\":\"${ENV}\"}"
+                FIRST=false
+              else
+                # Simple duplicate check - could be enhanced
+                if ! echo "$FOLDERS_JSON" | grep -q "\"name\":\"${FOLDER}\",\"env\":\"${ENV}\""; then
+                  FOLDERS_JSON="${FOLDERS_JSON},{\"name\":\"${FOLDER}\",\"env\":\"${ENV}\"}"
+                fi
+              fi
+            fi
+          done
+
+          FOLDERS_JSON="${FOLDERS_JSON}]"
+
+          echo "folders=$FOLDERS_JSON" >> $GITHUB_OUTPUT
+          echo ""
+          echo "📋 Detected folders to deploy:"
+          echo "$FOLDERS_JSON" | jq '.'
+
+  validate-and-sync:
+    name: Deploy ${{ matrix.folder.name }} → ${{ matrix.folder.env }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.folders != '[]'
+    strategy:
+      matrix:
+        folder: ${{ fromJson(needs.detect-changes.outputs.folders) }}
+      fail-fast: false  # Continue deploying other folders even if one fails
+    environment: ${{ matrix.folder.env }}
+
+    steps:
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 1: Checkout Repository
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 2: Configure AWS Credentials (OIDC)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+          role-session-name: GitHubActions-${{ matrix.folder.env }}-${{ github.run_id }}
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 3: Verify AWS Credentials
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: ✅ Verify AWS Credentials
+        run: |
+          echo "🔐 Verifying AWS credentials..."
+          AWS_IDENTITY=$(aws sts get-caller-identity)
+          echo "✅ Authenticated as:"
+          echo "$AWS_IDENTITY" | jq '.'
+          echo ""
+          echo "📍 Region: eu-west-1"
+          echo "🏷️  Environment: ${{ matrix.folder.env }}"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 4: Run Validation Only
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 🔍 Validate Deployment Prerequisites
+        id: validate
+        run: |
+          echo "🔍 Validating deployment prerequisites..."
+          chmod +x website_extractor/website-migrator/scripts/03_upload/sync.sh
+
+          # Run validation (outputs to stdout and GITHUB_OUTPUT)
+          website_extractor/website-migrator/scripts/03_upload/sync.sh \
+            "${{ matrix.folder.name }}" \
+            "${{ matrix.folder.env }}" \
+            --github-actions
+
+          echo "✅ Validation completed successfully"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 5: Display Deployment Plan
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 📋 Deployment Plan
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║              DEPLOYMENT PLAN                               ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "📁 Folder:           ${{ matrix.folder.name }}"
+          echo "🌍 Environment:      ${{ matrix.folder.env }}"
+          echo "🏷️  Mode:             LIVE DEPLOYMENT (auto-triggered)"
+          echo "🗑️  Delete Removed:   No"
+          echo ""
+          echo "📂 Local Folder:     ${{ steps.validate.outputs.local_folder }}"
+          echo "📦 S3 Bucket:        ${{ steps.validate.outputs.s3_bucket_uri }}"
+          echo "☁️  CloudFront ID:    ${{ steps.validate.outputs.distribution_id }}"
+          echo ""
+          if [ -n "${{ steps.validate.outputs.cloudfront_domain }}" ]; then
+            echo "🌐 CloudFront Domain: ${{ steps.validate.outputs.cloudfront_domain }}"
+          fi
+          echo ""
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 6: Sync to S3
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 📤 Sync Files to S3
+        run: |
+          echo "📤 Syncing files to S3..."
+
+          # Build sync command (no delete by default for auto-triggered deployments)
+          SYNC_CMD="aws s3 sync \"${{ steps.validate.outputs.local_folder }}\" \"${{ steps.validate.outputs.s3_bucket_uri }}\" --region eu-west-1"
+
+          echo "🔧 Running: $SYNC_CMD"
+          eval $SYNC_CMD
+
+          echo "✅ S3 sync completed successfully"
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 7: Create CloudFront Invalidation
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: ♻️  Invalidate CloudFront Cache
+        id: invalidate
+        run: |
+          echo "♻️  Creating CloudFront invalidation..."
+
+          DISTRIBUTION_ID="${{ steps.validate.outputs.distribution_id }}"
+
+          # Create invalidation
+          INVALIDATION_OUTPUT=$(aws cloudfront create-invalidation \
+            --distribution-id "$DISTRIBUTION_ID" \
+            --paths "/*" \
+            --query 'Invalidation.{Id:Id,Status:Status,CreateTime:CreateTime}' \
+            --output json)
+
+          INVALIDATION_ID=$(echo "$INVALIDATION_OUTPUT" | jq -r '.Id')
+
+          echo "invalidation_id=$INVALIDATION_ID" >> $GITHUB_OUTPUT
+
+          echo "✅ Invalidation created"
+          echo "🆔 Invalidation ID: $INVALIDATION_ID"
+          echo "$INVALIDATION_OUTPUT" | jq '.'
+          echo ""
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 9: Wait for Invalidation to Complete (if not dry run)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: ⏳ Wait for Cache Invalidation
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "⏳ Waiting for CloudFront invalidation to complete..."
+
+          DISTRIBUTION_ID="${{ steps.validate.outputs.distribution_id }}"
+          INVALIDATION_ID="${{ steps.invalidate.outputs.invalidation_id }}"
+
+          echo "🔄 Monitoring invalidation: $INVALIDATION_ID"
+          echo "⏱️  This typically takes 1-5 minutes..."
+          echo ""
+
+          # Wait for invalidation with timeout
+          TIMEOUT=900  # 15 minutes
+          ELAPSED=0
+          INTERVAL=10
+
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            STATUS=$(aws cloudfront get-invalidation \
+              --distribution-id "$DISTRIBUTION_ID" \
+              --id "$INVALIDATION_ID" \
+              --query 'Invalidation.Status' \
+              --output text)
+
+            echo "⏱️  Elapsed: ${ELAPSED}s | Status: $STATUS"
+
+            if [ "$STATUS" = "Completed" ]; then
+              echo ""
+              echo "✅ CloudFront cache invalidation completed successfully!"
+              exit 0
+            fi
+
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          echo ""
+          echo "⚠️  Warning: Invalidation did not complete within ${TIMEOUT}s"
+          echo "⚠️  The invalidation is still in progress and will complete soon."
+          echo "⚠️  Check AWS Console for status: $INVALIDATION_ID"
+          exit 0  # Don't fail the workflow
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # Step 10: Deployment Summary
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      - name: 🎉 Deployment Summary
+        if: always()
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║              DEPLOYMENT SUMMARY                            ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "📁 Folder:             ${{ matrix.folder.name }}"
+          echo "🌍 Environment:        ${{ matrix.folder.env }}"
+          echo "🏷️  Mode:               LIVE DEPLOYMENT (auto-triggered)"
+          echo "📦 S3 Bucket:          ${{ steps.validate.outputs.s3_bucket_uri }}"
+          echo "☁️  CloudFront ID:      ${{ steps.validate.outputs.distribution_id }}"
+
+          if [ -n "${{ steps.validate.outputs.cloudfront_domain }}" ]; then
+            echo "🌐 CloudFront Domain:  ${{ steps.validate.outputs.cloudfront_domain }}"
+            echo "🔗 URL:                https://${{ steps.validate.outputs.cloudfront_domain }}"
+          fi
+
+          if [ -n "${{ steps.invalidate.outputs.invalidation_id }}" ]; then
+            echo "♻️  Invalidation ID:    ${{ steps.invalidate.outputs.invalidation_id }}"
+          fi
+
+          echo ""
+          echo "🕒 Started:            ${{ github.event.head_commit.timestamp || github.event.created_at }}"
+          echo "👤 Triggered by:       ${{ github.actor }}"
+          echo "🔢 Run ID:             ${{ github.run_id }}"
+          echo ""
+
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Status: DEPLOYMENT SUCCESSFUL"
+          else
+            echo "❌ Status: DEPLOYMENT FAILED"
+          fi
+
+          echo ""
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo ""

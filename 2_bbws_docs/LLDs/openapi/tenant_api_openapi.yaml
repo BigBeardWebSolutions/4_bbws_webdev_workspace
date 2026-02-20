@@ -1,0 +1,939 @@
+openapi: 3.0.3
+info:
+  title: BBWS Tenant Management API
+  description: |
+    Tenant Management API for BBWS Multi-Tenant WordPress Hosting Platform.
+
+    Manages the logical tenant entity (organization, hierarchy, metadata, users)
+    and provides RESTful API endpoints for tenant CRUD operations, organization
+    hierarchy management, user assignments, and tenant lifecycle state transitions
+    including Park/Unpark operations.
+
+    ## Key Concepts
+    - **Tenant**: Customer organization entity in the multi-tenant platform
+    - **Park**: Temporarily disable a tenant to release resources while preserving data
+    - **Unpark**: Reactivate a parked tenant and reprovision resources
+    - **Hierarchy**: Division -> Group -> Team structure for organizing users
+
+  version: 1.0.0
+  contact:
+    name: BBWS Platform Team
+    email: platform@bbws.io
+
+servers:
+  - url: https://api.dev.bbws.io/v1.0
+    description: Development
+  - url: https://api.sit.bbws.io/v1.0
+    description: SIT
+  - url: https://api.bbws.io/v1.0
+    description: Production
+
+tags:
+  - name: Tenants
+    description: Tenant CRUD operations
+  - name: Tenant Lifecycle
+    description: Status transitions, park/unpark operations
+  - name: User Assignments
+    description: User-tenant relationship management
+  - name: Hierarchy
+    description: Organization hierarchy management
+
+paths:
+  /tenants:
+    post:
+      tags:
+        - Tenants
+      summary: Create tenant organization
+      description: |
+        Creates a new tenant organization. The tenant is created with status PENDING
+        and must be provisioned before becoming ACTIVE.
+      operationId: createTenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+            example:
+              organizationName: "Acme Corporation"
+              contactEmail: "admin@acme.com"
+              environment: "prod"
+              division: "Technology"
+              metadata:
+                industry: "Software"
+                size: "Enterprise"
+      responses:
+        '201':
+          description: Tenant created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Organization name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "CONFLICT"
+                  message: "Organization name already exists"
+
+    get:
+      tags:
+        - Tenants
+      summary: List tenants
+      description: |
+        Returns a paginated list of tenants. Supports filtering by status
+        and organization name.
+      operationId: listTenants
+      parameters:
+        - name: status
+          in: query
+          description: Filter by tenant status
+          schema:
+            $ref: '#/components/schemas/TenantStatus'
+        - name: organizationName
+          in: query
+          description: Filter by organization name (partial match)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: nextToken
+          in: query
+          description: Pagination token from previous response
+          schema:
+            type: string
+        - name: sortBy
+          in: query
+          description: Sort field
+          schema:
+            type: string
+            enum: [createdAt, organizationName]
+            default: createdAt
+        - name: sortOrder
+          in: query
+          description: Sort order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: List of tenants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantListResponse'
+
+  /tenants/{tenantId}:
+    get:
+      tags:
+        - Tenants
+      summary: Get tenant details
+      description: Retrieve complete tenant information by ID.
+      operationId: getTenant
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      responses:
+        '200':
+          description: Tenant details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '404':
+          description: Tenant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags:
+        - Tenants
+      summary: Update tenant
+      description: |
+        Update tenant information. Only modifiable fields can be updated.
+        Tenant ID and createdAt are immutable.
+      operationId: updateTenant
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantRequest'
+      responses:
+        '200':
+          description: Tenant updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '404':
+          description: Tenant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Cannot update deprovisioned tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Tenants
+      summary: Soft delete (deprovision) tenant
+      description: |
+        Marks the tenant as DEPROVISIONED. This is a soft delete - data is preserved
+        for audit purposes. Active resources must be deprovisioned first unless force=true.
+      operationId: deleteTenant
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - name: force
+          in: query
+          description: Force delete even with active resources
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Tenant deprovisioned successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '404':
+          description: Tenant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Cannot delete tenant with active resources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tenants/{tenantId}/status:
+    patch:
+      tags:
+        - Tenant Lifecycle
+      summary: Update tenant status
+      description: |
+        Update tenant lifecycle status. Only valid transitions are allowed.
+
+        **Valid Transitions:**
+        - PENDING -> ACTIVE (provisioning complete)
+        - ACTIVE -> SUSPENDED (payment issue, policy violation)
+        - SUSPENDED -> ACTIVE (issue resolved)
+        - ACTIVE -> PARKED (cost optimization)
+        - PARKED -> ACTIVE (reactivation)
+        - ACTIVE/SUSPENDED/PARKED -> DEPROVISIONED (offboarding)
+      operationId: updateTenantStatus
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStatusRequest'
+      responses:
+        '200':
+          description: Status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '422':
+          description: Invalid status transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "INVALID_STATUS_TRANSITION"
+                  message: "Cannot transition from PENDING to PARKED"
+
+  /tenants/{tenantId}/park:
+    post:
+      tags:
+        - Tenant Lifecycle
+      summary: Park tenant
+      description: |
+        Park an active tenant to release resources while preserving data.
+        Parked tenants incur $0 compute cost. All sites within the tenant
+        become unavailable until unparked.
+
+        **Requirements:**
+        - Tenant must be in ACTIVE status
+        - Reason is required
+      operationId: parkTenant
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParkTenantRequest'
+            example:
+              reason: "Customer requested temporary suspension for cost reduction"
+      responses:
+        '200':
+          description: Tenant parked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParkTenantResponse'
+        '422':
+          description: Only active tenants can be parked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "INVALID_OPERATION"
+                  message: "Only active tenants can be parked"
+
+  /tenants/{tenantId}/unpark:
+    post:
+      tags:
+        - Tenant Lifecycle
+      summary: Unpark tenant
+      description: |
+        Reactivate a parked tenant. Resources will be reprovisioned which
+        may take up to 15 minutes.
+
+        **Requirements:**
+        - Tenant must be in PARKED status
+      operationId: unparkTenant
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      responses:
+        '200':
+          description: Tenant unpark initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnparkTenantResponse'
+        '422':
+          description: Only parked tenants can be unparked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tenants/{tenantId}/users:
+    post:
+      tags:
+        - User Assignments
+      summary: Assign user to tenant
+      description: |
+        Assign a user to a tenant with a specific role. User must exist in Cognito.
+      operationId: assignUser
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignUserRequest'
+            example:
+              userId: "user-550e8400-e29b-41d4-a716-446655440000"
+              email: "john@acme.com"
+              role: "Admin"
+      responses:
+        '201':
+          description: User assigned successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAssignment'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Tenant or user not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      tags:
+        - User Assignments
+      summary: List users in tenant
+      description: Returns a paginated list of users assigned to the tenant.
+      operationId: listTenantUsers
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - name: role
+          in: query
+          description: Filter by role
+          schema:
+            $ref: '#/components/schemas/UserRole'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: nextToken
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of user assignments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAssignmentListResponse'
+
+  /tenants/{tenantId}/users/{userId}:
+    delete:
+      tags:
+        - User Assignments
+      summary: Remove user from tenant
+      description: |
+        Remove a user's assignment from the tenant. Cannot remove the last Admin.
+      operationId: removeUser
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: User removed successfully
+        '404':
+          description: Assignment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Cannot remove last Admin from tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/{userId}/tenants:
+    get:
+      tags:
+        - User Assignments
+      summary: Get user's tenants
+      description: Returns list of tenants the user is assigned to.
+      operationId: getUserTenants
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of tenant assignments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserTenantListResponse'
+
+  /tenants/{tenantId}/hierarchy:
+    post:
+      tags:
+        - Hierarchy
+      summary: Create organization hierarchy
+      description: |
+        Create organization hierarchy levels (Division -> Group -> Team) for a tenant.
+      operationId: createHierarchy
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HierarchyRequest'
+      responses:
+        '201':
+          description: Hierarchy created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Hierarchy'
+        '409':
+          description: Hierarchy already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags:
+        - Hierarchy
+      summary: Update organization hierarchy
+      description: Update existing hierarchy levels.
+      operationId: updateHierarchy
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HierarchyRequest'
+      responses:
+        '200':
+          description: Hierarchy updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Hierarchy'
+
+    delete:
+      tags:
+        - Hierarchy
+      summary: Delete organization hierarchy
+      description: |
+        Delete hierarchy levels. Only empty hierarchies can be deleted
+        unless cascade=true.
+      operationId: deleteHierarchy
+      parameters:
+        - $ref: '#/components/parameters/tenantId'
+        - name: cascade
+          in: query
+          description: Cascade delete including user reassignments
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '204':
+          description: Hierarchy deleted
+        '422':
+          description: Hierarchy not empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  parameters:
+    tenantId:
+      name: tenantId
+      in: path
+      required: true
+      description: Tenant identifier
+      schema:
+        type: string
+        pattern: '^tenant-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      example: "tenant-550e8400-e29b-41d4-a716-446655440000"
+
+  schemas:
+    CreateTenantRequest:
+      type: object
+      required:
+        - organizationName
+        - contactEmail
+        - environment
+      properties:
+        organizationName:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: Organization name (must be unique)
+          example: "Acme Corporation"
+        contactEmail:
+          type: string
+          format: email
+          description: Primary contact email
+          example: "admin@acme.com"
+        environment:
+          type: string
+          enum: [dev, sit, prod]
+          description: Target environment
+        division:
+          type: string
+          maxLength: 50
+          description: Organization division
+        group:
+          type: string
+          maxLength: 50
+          description: Organization group
+        team:
+          type: string
+          maxLength: 50
+          description: Organization team
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Custom metadata key-value pairs
+
+    UpdateTenantRequest:
+      type: object
+      properties:
+        organizationName:
+          type: string
+          minLength: 2
+          maxLength: 100
+        contactEmail:
+          type: string
+          format: email
+        division:
+          type: string
+          maxLength: 50
+        group:
+          type: string
+          maxLength: 50
+        team:
+          type: string
+          maxLength: 50
+        metadata:
+          type: object
+          additionalProperties: true
+
+    UpdateStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/TenantStatus'
+        reason:
+          type: string
+          description: Reason for status change (required for SUSPENDED)
+
+    ParkTenantRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 500
+          description: Reason for parking the tenant
+
+    TenantResponse:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          example: "tenant-550e8400-e29b-41d4-a716-446655440000"
+        organizationName:
+          type: string
+          example: "Acme Corporation"
+        contactEmail:
+          type: string
+          format: email
+        environment:
+          type: string
+          enum: [dev, sit, prod]
+        status:
+          $ref: '#/components/schemas/TenantStatus'
+        division:
+          type: string
+        group:
+          type: string
+        team:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        parkedAt:
+          type: string
+          format: date-time
+          nullable: true
+        parkedBy:
+          type: string
+          nullable: true
+        parkReason:
+          type: string
+          nullable: true
+        version:
+          type: integer
+        _links:
+          $ref: '#/components/schemas/TenantLinks'
+
+    TenantLinks:
+      type: object
+      properties:
+        self:
+          type: object
+          properties:
+            href:
+              type: string
+        users:
+          type: object
+          properties:
+            href:
+              type: string
+        park:
+          type: object
+          properties:
+            href:
+              type: string
+        unpark:
+          type: object
+          properties:
+            href:
+              type: string
+
+    TenantListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantResponse'
+        count:
+          type: integer
+        nextToken:
+          type: string
+          nullable: true
+
+    ParkTenantResponse:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        status:
+          type: string
+          enum: [PARKED]
+        parkedAt:
+          type: string
+          format: date-time
+        parkedBy:
+          type: string
+        parkReason:
+          type: string
+        message:
+          type: string
+          example: "Tenant parked successfully. Resources will be released within 5 minutes."
+        _links:
+          $ref: '#/components/schemas/TenantLinks'
+
+    UnparkTenantResponse:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE]
+        unparkedAt:
+          type: string
+          format: date-time
+        unparkedBy:
+          type: string
+        message:
+          type: string
+          example: "Tenant unpark initiated. Resources will be reprovisioned within 15 minutes."
+        warning:
+          type: string
+          example: "Full functionality may not be available immediately. Resource reprovisioning in progress."
+        _links:
+          $ref: '#/components/schemas/TenantLinks'
+
+    TenantStatus:
+      type: string
+      enum:
+        - PENDING
+        - ACTIVE
+        - SUSPENDED
+        - PARKED
+        - DEPROVISIONED
+        - FAILED
+      description: |
+        Tenant status lifecycle:
+        - PENDING: Initial state, awaiting provisioning
+        - ACTIVE: Fully provisioned and operational
+        - SUSPENDED: Temporarily disabled due to policy/payment
+        - PARKED: Temporarily disabled for cost optimization
+        - DEPROVISIONED: Terminal state, soft deleted
+        - FAILED: Provisioning failed
+
+    AssignUserRequest:
+      type: object
+      required:
+        - userId
+        - email
+        - role
+      properties:
+        userId:
+          type: string
+          description: Cognito user ID
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/UserRole'
+
+    UserRole:
+      type: string
+      enum:
+        - Admin
+        - Operator
+        - Viewer
+      description: User role within the tenant
+
+    UserAssignment:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        userId:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/UserRole'
+        assignedAt:
+          type: string
+          format: date-time
+        assignedBy:
+          type: string
+
+    UserAssignmentListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserAssignment'
+        count:
+          type: integer
+        nextToken:
+          type: string
+          nullable: true
+
+    UserTenantListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              tenantId:
+                type: string
+              organizationName:
+                type: string
+              role:
+                $ref: '#/components/schemas/UserRole'
+              assignedAt:
+                type: string
+                format: date-time
+
+    HierarchyRequest:
+      type: object
+      required:
+        - division
+      properties:
+        division:
+          type: string
+          minLength: 2
+          maxLength: 50
+        group:
+          type: string
+          maxLength: 50
+        team:
+          type: string
+          maxLength: 50
+
+    Hierarchy:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        division:
+          type: string
+        group:
+          type: string
+        team:
+          type: string
+        userCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Error code
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              type: object
+              description: Additional error details
+              additionalProperties: true
+        requestId:
+          type: string
+          description: Request ID for troubleshooting
+        timestamp:
+          type: string
+          format: date-time
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito JWT token
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: API Gateway API key
+
+security:
+  - bearerAuth: []
+  - apiKey: []

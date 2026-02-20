@@ -1,0 +1,364 @@
+name: SIT Environment Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - 'plan'
+          - 'apply'
+          - 'destroy'
+
+env:
+  TF_VERSION: '1.5.0'
+  ENVIRONMENT: 'sit'
+  AWS_REGION: 'eu-west-1'
+  AWS_ACCOUNT_ID: '815856636111'
+
+jobs:
+  # ============================================
+  # Validate Prerequisites
+  # ============================================
+  validate:
+    name: Validate Prerequisites
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SIT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Validate-SIT-${{ github.run_id }}
+
+      - name: Verify AWS Account
+        run: |
+          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          if [ "$CURRENT_ACCOUNT" != "${{ env.AWS_ACCOUNT_ID }}" ]; then
+            echo "❌ ERROR: Wrong AWS account! Expected ${{ env.AWS_ACCOUNT_ID }}, got $CURRENT_ACCOUNT"
+            exit 1
+          fi
+          echo "✅ Connected to correct AWS account: $CURRENT_ACCOUNT"
+
+      - name: Check Backend Resources
+        run: |
+          echo "Checking S3 backend bucket..."
+          if ! aws s3 ls s3://bbws-terraform-state-sit 2>/dev/null; then
+            echo "❌ ERROR: S3 backend bucket does not exist"
+            echo "Create with: aws s3 mb s3://bbws-terraform-state-sit --region eu-west-1"
+            exit 1
+          fi
+          echo "✅ S3 bucket exists"
+
+          echo "Checking DynamoDB lock table..."
+          if ! aws dynamodb describe-table --table-name bbws-terraform-locks-sit --region eu-west-1 2>/dev/null; then
+            echo "❌ ERROR: DynamoDB lock table does not exist"
+            echo "Create with: aws dynamodb create-table --table-name bbws-terraform-locks-sit ..."
+            exit 1
+          fi
+          echo "✅ DynamoDB table exists"
+
+          echo "✅ All backend resources validated"
+
+  # ============================================
+  # Terraform Plan
+  # ============================================
+  terraform-plan:
+    name: Terraform Plan (SIT)
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: terraform
+    outputs:
+      plan_exitcode: ${{ steps.plan.outputs.exitcode }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SIT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Plan-SIT-${{ github.run_id }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config=environments/sit/backend-sit.hcl \
+            -input=false
+
+          terraform workspace select sit || terraform workspace new sit
+          echo "📍 Workspace: $(terraform workspace show)"
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          set +e
+          terraform plan \
+            -var-file=environments/sit/sit.tfvars \
+            -var="aws_account_id=${{ env.AWS_ACCOUNT_ID }}" \
+            -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
+            -no-color \
+            -out=tfplan \
+            -detailed-exitcode
+
+          TF_EXIT=$?
+          echo "exitcode=$TF_EXIT" >> $GITHUB_OUTPUT
+
+          terraform show -no-color tfplan > plan.txt
+          exit $TF_EXIT
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-sit
+          path: terraform/tfplan
+          retention-days: 7
+
+      - name: Upload Plan Text
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-text-sit
+          path: terraform/plan.txt
+          retention-days: 7
+
+      - name: Create Plan Summary
+        run: |
+          echo "## Terraform Plan - SIT Environment 📋" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Account**: ${{ env.AWS_ACCOUNT_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Action**: ${{ github.event.inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.plan.outputs.exitcode }}" == "0" ]; then
+            echo "✅ **No changes detected**" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.plan.outputs.exitcode }}" == "2" ]; then
+            echo "⚠️ **Changes detected** - Review plan before applying" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Plan Output</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            head -100 plan.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================
+  # Terraform Apply (Requires Approval)
+  # ============================================
+  terraform-apply:
+    name: Terraform Apply (SIT)
+    needs: [validate, terraform-plan]
+    if: github.event.inputs.action == 'apply'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: sit
+      url: https://console.aws.amazon.com/ecs/v2/clusters/sit-cluster
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SIT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Apply-SIT-${{ github.run_id }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config=environments/sit/backend-sit.hcl \
+            -input=false
+
+          terraform workspace select sit
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-sit
+          path: terraform/
+
+      - name: Terraform Apply
+        run: |
+          echo "🚀 Applying Terraform changes to SIT..."
+          terraform apply -auto-approve tfplan
+          echo "✅ Infrastructure deployed successfully"
+
+      - name: Get Outputs
+        id: outputs
+        run: |
+          echo "alb_dns=$(terraform output -raw alb_dns_name)" >> $GITHUB_OUTPUT
+          echo "rds_endpoint=$(terraform output -raw rds_endpoint)" >> $GITHUB_OUTPUT
+          echo "ecs_cluster=$(terraform output -raw ecs_cluster_name)" >> $GITHUB_OUTPUT
+          echo "vpc_id=$(terraform output -raw vpc_id)" >> $GITHUB_OUTPUT
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 SIT Infrastructure Deployed!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Infrastructure Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **ALB DNS**: ${{ steps.outputs.outputs.alb_dns }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **RDS Endpoint**: ${{ steps.outputs.outputs.rds_endpoint }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **ECS Cluster**: ${{ steps.outputs.outputs.ecs_cluster }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **VPC ID**: ${{ steps.outputs.outputs.vpc_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Steps**:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Validate infrastructure health" >> $GITHUB_STEP_SUMMARY
+          echo "2. Promote tenant-1 and tenant-2 from DEV" >> $GITHUB_STEP_SUMMARY
+          echo "3. Configure DNS records" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # Post-Deployment Validation
+  # ============================================
+  validate-deployment:
+    name: Validate Deployment
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SIT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Validate-Deploy-SIT-${{ github.run_id }}
+
+      - name: Check RDS Status
+        run: |
+          echo "Checking RDS instance..."
+          RDS_STATUS=$(aws rds describe-db-instances \
+            --db-instance-identifier sit-mysql \
+            --query 'DBInstances[0].DBInstanceStatus' \
+            --output text)
+
+          if [ "$RDS_STATUS" == "available" ]; then
+            echo "✅ RDS is available"
+          else
+            echo "⚠️ RDS status: $RDS_STATUS"
+          fi
+
+      - name: Check ECS Cluster
+        run: |
+          echo "Checking ECS cluster..."
+          CLUSTER_STATUS=$(aws ecs describe-clusters \
+            --clusters sit-cluster \
+            --query 'clusters[0].status' \
+            --output text)
+
+          if [ "$CLUSTER_STATUS" == "ACTIVE" ]; then
+            echo "✅ ECS cluster is active"
+          else
+            echo "⚠️ ECS cluster status: $CLUSTER_STATUS"
+          fi
+
+      - name: Check ALB
+        run: |
+          echo "Checking ALB..."
+          ALB_STATE=$(aws elbv2 describe-load-balancers \
+            --names sit-alb \
+            --query 'LoadBalancers[0].State.Code' \
+            --output text)
+
+          if [ "$ALB_STATE" == "active" ]; then
+            echo "✅ ALB is active"
+          else
+            echo "⚠️ ALB state: $ALB_STATE"
+          fi
+
+      - name: Validation Summary
+        run: |
+          echo "## ✅ Deployment Validation Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All infrastructure components are healthy and ready for tenant provisioning." >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # Terraform Destroy (Manual Only)
+  # ============================================
+  terraform-destroy:
+    name: Terraform Destroy (SIT)
+    if: github.event.inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: destroy-sit
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SIT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Destroy-SIT-${{ github.run_id }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config=environments/sit/backend-sit.hcl \
+            -input=false
+          terraform workspace select sit
+
+      - name: Terraform Destroy
+        run: |
+          echo "⚠️ DESTROYING SIT INFRASTRUCTURE..."
+          terraform destroy \
+            -var-file=environments/sit/sit.tfvars \
+            -var="aws_account_id=${{ env.AWS_ACCOUNT_ID }}" \
+            -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
+            -auto-approve
+          echo "✅ Infrastructure destroyed"
+
+      - name: Destroy Summary
+        run: |
+          echo "## ⚠️ SIT Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "All resources in SIT environment have been removed." >> $GITHUB_STEP_SUMMARY

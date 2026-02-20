@@ -1,0 +1,141 @@
+name: 'Generate Tenant Configuration'
+description: 'Generates a JSON configuration file for the deployed tenant'
+
+inputs:
+  tenant_name:
+    description: 'Tenant name'
+    required: true
+  environment:
+    description: 'Environment (dev, sit, prod)'
+    required: true
+  domain_name:
+    description: 'Tenant domain name'
+    required: true
+  alb_priority:
+    description: 'ALB listener rule priority'
+    required: true
+  workflow_run_id:
+    description: 'GitHub workflow run ID'
+    required: true
+  aws_region:
+    description: 'AWS region'
+    required: true
+
+outputs:
+  config_file:
+    description: 'Path to the generated configuration file'
+    value: ${{ steps.generate.outputs.config_file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate Configuration
+      id: generate
+      shell: bash
+      run: |
+        TENANT="${{ inputs.tenant_name }}"
+        ENV="${{ inputs.environment }}"
+        DOMAIN="${{ inputs.domain_name }}"
+        PRIORITY="${{ inputs.alb_priority }}"
+
+        echo "📝 Generating tenant configuration..."
+
+        # Create config directory
+        mkdir -p config/$ENV
+
+        CONFIG_FILE="config/$ENV/${TENANT}.json"
+
+        # Get infrastructure details from AWS
+        echo "   - Fetching infrastructure details..."
+
+        # Get ECS service ARN
+        SERVICE_ARN=$(aws ecs describe-services \
+          --cluster "${ENV}-cluster" \
+          --services "${ENV}-${TENANT}-service" \
+          --query 'services[0].serviceArn' \
+          --output text \
+          --region ${{ inputs.aws_region }} 2>/dev/null || echo "")
+
+        # Get task definition ARN
+        TASK_DEF_ARN=$(aws ecs describe-services \
+          --cluster "${ENV}-cluster" \
+          --services "${ENV}-${TENANT}-service" \
+          --query 'services[0].taskDefinition' \
+          --output text \
+          --region ${{ inputs.aws_region }} 2>/dev/null || echo "")
+
+        # Get target group ARN
+        TG_ARN=$(aws elbv2 describe-target-groups \
+          --query "TargetGroups[?TargetGroupName=='${ENV}-${TENANT}-tg'].TargetGroupArn | [0]" \
+          --output text \
+          --region ${{ inputs.aws_region }} 2>/dev/null || echo "")
+
+        # Get EFS access point ID
+        EFS_AP=$(aws efs describe-access-points \
+          --query "AccessPoints[?Tags[?Key=='Tenant' && Value=='${TENANT}'] && Tags[?Key=='Environment' && Value=='${ENV}']].AccessPointId | [0]" \
+          --output text \
+          --region ${{ inputs.aws_region }} 2>/dev/null || echo "")
+
+        # Get Secrets Manager secret ARN
+        SECRET_ARN=$(aws secretsmanager list-secrets \
+          --query "SecretList[?Name=='${ENV}-${TENANT}-db-credentials'].ARN | [0]" \
+          --output text \
+          --region ${{ inputs.aws_region }} 2>/dev/null || echo "")
+
+        # Get RDS endpoint
+        RDS_ENDPOINT=$(aws rds describe-db-instances \
+          --db-instance-identifier "${ENV}-mysql" \
+          --query 'DBInstances[0].Endpoint.Address' \
+          --output text \
+          --region ${{ inputs.aws_region }} 2>/dev/null || echo "")
+
+        # Generate JSON configuration
+        cat > "$CONFIG_FILE" <<EOF
+        {
+          "tenant_name": "${TENANT}",
+          "environment": "${ENV}",
+          "deployment_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "deployed_by": "github-actions",
+          "workflow_run": "${{ inputs.workflow_run_id }}",
+          "url": "https://${DOMAIN}",
+          "infrastructure": {
+            "service_name": "${ENV}-${TENANT}-service",
+            "service_arn": "${SERVICE_ARN}",
+            "task_definition_arn": "${TASK_DEF_ARN}",
+            "cluster": "${ENV}-cluster",
+            "alb_priority": ${PRIORITY},
+            "target_group_arn": "${TG_ARN}",
+            "target_group_name": "${ENV}-${TENANT}-tg",
+            "efs_access_point_id": "${EFS_AP}"
+          },
+          "database": {
+            "name": "${TENANT}_db",
+            "username": "${TENANT}_user",
+            "secret_arn": "${SECRET_ARN}",
+            "host": "${RDS_ENDPOINT}",
+            "port": 3306
+          },
+          "storage": {
+            "efs_path": "/${TENANT}",
+            "access_point_id": "${EFS_AP}"
+          },
+          "terraform": {
+            "workspace": "${ENV}",
+            "state_bucket": "bbws-terraform-state-${ENV}",
+            "state_key": "tenants/${TENANT}/terraform.tfstate"
+          }
+        }
+        EOF
+
+        # Pretty print the JSON
+        if command -v jq &> /dev/null; then
+          jq '.' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+        fi
+
+        echo "✅ Configuration generated: $CONFIG_FILE"
+        echo "config_file=$CONFIG_FILE" >> $GITHUB_OUTPUT
+
+        # Display configuration
+        echo ""
+        echo "📋 Tenant Configuration:"
+        cat "$CONFIG_FILE"

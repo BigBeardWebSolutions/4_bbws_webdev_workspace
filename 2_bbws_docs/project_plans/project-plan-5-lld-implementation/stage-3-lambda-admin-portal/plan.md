@@ -1,0 +1,204 @@
+# Stage 3: Lambda Implementation - Admin Portal (REVISED)
+
+**Stage ID**: stage-3-lambda-admin-portal
+**Project**: project-plan-5-lld-implementation
+**Status**: IN_PROGRESS
+**Workers**: 4 (reduced from 7 based on gap analysis)
+**Started**: 2026-01-25
+
+---
+
+## Revision Notes
+
+**IMPORTANT**: This plan has been revised based on gap analysis of existing implementations.
+
+### Existing Implementations Discovered
+
+| Repository | LLDs Covered | Implementation Status |
+|------------|--------------|----------------------|
+| `2_bbws_tenants_instances_lambda` | LLD 2.5 + 2.7 | 95% complete |
+| `2_bbws_wordpress_site_management_lambda` | LLD 2.6 | 100% complete (templates) |
+
+### Workers Removed (Already Implemented)
+
+| Original Worker | Reason for Removal |
+|-----------------|-------------------|
+| worker-1-tenant-admin-handlers | ✅ Fully implemented (CRUD, park/unpark) |
+| worker-2-tenant-lifecycle-handlers | ✅ Fully implemented (suspend/resume/deprovision) |
+| worker-3-template-admin-handlers | ✅ 100% complete (8/8 endpoints) |
+| worker-7-sqs-consumers | ✅ Implemented in Stage 2 |
+
+---
+
+## Stage Objective
+
+Implement **MISSING** Lambda functions for the Admin Portal by extending existing repositories, not creating new ones.
+
+---
+
+## Revised Stage Workers
+
+| Worker | Task | Target Repo | Missing APIs |
+|--------|------|-------------|--------------|
+| worker-1-user-detail-handler | User Detail Handler | `2_bbws_tenants_instances_lambda` | GET /users/{id} |
+| worker-2-instance-scaling | Instance Scaling Handler | `2_bbws_tenants_instances_lambda` | POST /instances/{id}/scale |
+| worker-3-ecs-event-handler | ECS Event Handler | `2_bbws_tenants_event_handler` (NEW) | EventBridge → DynamoDB |
+| worker-4-gitops-terraform | GitOps Terraform Repo | `2_bbws_tenants_instances_dev` (NEW) | DEV environment Terraform |
+
+---
+
+## Gap Analysis Detail
+
+### Worker 1: User Detail Handler (LLD 2.5)
+
+**Target Repository**: `2_bbws_tenants_instances_lambda`
+**Status**: 0% implemented
+
+| Endpoint | Method | Path | Handler Needed |
+|----------|--------|------|----------------|
+| Get User Detail | GET | `/users/{id}` | `get_user_handler.py` |
+
+**Notes**: Existing user handlers cover assignment, listing, role updates. Missing individual user detail endpoint.
+
+### Worker 2: Instance Scaling Handler (LLD 2.7)
+
+**Target Repository**: `2_bbws_tenants_instances_lambda`
+**Status**: 0% implemented
+
+| Endpoint | Method | Path | Handler Needed |
+|----------|--------|------|----------------|
+| Scale Instance | POST | `/instances/{id}/scale` | `scale_instance_handler.py` |
+
+**Notes**: Allows changing ECS task count/size. Triggers GitOps workflow.
+
+### Worker 3: ECS Event Handler (LLD 2.7)
+
+**Target Repository**: `2_bbws_tenants_event_handler` (NEW)
+**Status**: Repository does not exist
+
+**Components**:
+- EventBridge rule to capture ECS state changes
+- Lambda handler to process events
+- DynamoDB update for instance status sync
+
+### Worker 4: GitOps Terraform Repository (LLD 2.7)
+
+**Target Repository**: `2_bbws_tenants_instances_dev` (NEW)
+**Status**: Repository does not exist
+
+**Components**:
+- Terraform modules for DEV environment
+- GitHub Actions workflows for apply/destroy
+- Variable templates for each tenant instance
+
+---
+
+## Stage Inputs
+
+| Input | Source |
+|-------|--------|
+| Stage 1 Analysis Outputs | Stage 1 workers |
+| Stage 2 Lambda Code | Stage 2 workers (shared models, utils) |
+| LLD 2.5 Tenant Management | `/Users/tebogotseka/Documents/agentic_work/2_bbws_docs/LLDs/2.5_LLD_Tenant_Management.md` |
+| LLD 2.7 WordPress Instance Management | `/Users/tebogotseka/Documents/agentic_work/2_bbws_docs/LLDs/2.7_LLD_WordPress_Instance_Management.md` |
+| Existing Tenant Lambda | `/Users/tebogotseka/Documents/agentic_work/2_bbws_tenants_instances_lambda/` |
+
+---
+
+## Stage Outputs
+
+### Worker 1 Outputs (User Detail - `2_bbws_tenants_instances_lambda`)
+```
+src/handlers/users/
+└── get_user_handler.py
+tests/unit/handlers/users/
+└── test_get_user_handler.py
+```
+
+### Worker 2 Outputs (Instance Scaling - `2_bbws_tenants_instances_lambda`)
+```
+src/handlers/instances/
+└── scale_instance_handler.py
+tests/unit/handlers/instances/
+└── test_scale_instance_handler.py
+```
+
+### Worker 3 Outputs (ECS Event Handler - `2_bbws_tenants_event_handler`)
+```
+2_bbws_tenants_event_handler/
+├── src/
+│   ├── handlers/
+│   │   └── ecs_event_handler.py
+│   ├── services/
+│   │   └── state_sync_service.py
+│   └── models/
+│       └── ecs_event.py
+├── tests/
+│   └── unit/
+│       ├── test_ecs_event_handler.py
+│       └── test_state_sync_service.py
+├── requirements.txt
+├── serverless.yml (or SAM template)
+└── README.md
+```
+
+### Worker 4 Outputs (GitOps Terraform - `2_bbws_tenants_instances_dev`)
+```
+2_bbws_tenants_instances_dev/
+├── modules/
+│   ├── ecs-service/
+│   ├── alb-target-group/
+│   ├── efs-access-point/
+│   └── rds-database/
+├── tenants/
+│   └── .gitkeep (tenant configs generated by Lambda)
+├── .github/
+│   └── workflows/
+│       ├── terraform-apply.yml
+│       └── terraform-destroy.yml
+├── variables.tf
+├── outputs.tf
+├── backend.tf (S3 state)
+└── README.md
+```
+
+---
+
+## Success Criteria
+
+- [ ] User Detail handler implemented (GET /users/{id})
+- [ ] Instance Scaling handler implemented (POST /instances/{id}/scale)
+- [ ] ECS Event Handler Lambda implemented in new repository
+- [ ] GitOps Terraform repository created with DEV modules
+- [ ] All unit tests passing (80%+ coverage)
+- [ ] All handlers follow existing code patterns in target repos
+- [ ] EventBridge event handler syncs ECS state to DynamoDB
+- [ ] GitHub Actions workflows for Terraform apply/destroy
+- [ ] All 4 workers completed
+- [ ] Stage summary created
+
+---
+
+## Dependencies
+
+**Depends On**: Stage 2 (Lambda Implementation - Customer Portal) ✓ COMPLETE
+
+**Blocks**: Stage 4 (CI/CD Pipeline Development)
+
+---
+
+## Gate 3 Approval
+
+**Approvers**: Tech Lead, DevOps Lead
+
+**Criteria**:
+- All Admin Portal gap Lambdas functional
+- Unit tests pass with 80%+ coverage
+- GitOps workflow properly triggers Terraform
+- EventBridge integration working
+- Code follows TDD/OOP standards
+
+---
+
+**Created**: 2026-01-24
+**Revised**: 2026-01-25 (Gap analysis revision)

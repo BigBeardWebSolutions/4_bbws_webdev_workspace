@@ -1,0 +1,48 @@
+name: Deploy Tenant - goldencrust
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - sit
+          - prod
+        default: 'dev'
+      deploy_phase:
+        description: 'Deployment phase'
+        required: false
+        type: choice
+        options:
+          - all
+          - ecs
+          - database
+          - dns
+          - testing
+        default: 'all'
+      terraform_action:
+        description: 'Terraform action'
+        required: false
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: 'apply'
+
+jobs:
+  deploy:
+    name: Deploy goldencrust to ${{ inputs.environment }}
+    uses: ./.github/workflows/deploy-tenant.yml
+    with:
+      tenant_name: 'goldencrust'
+      environment: ${{ inputs.environment }}
+      alb_priority: ${{ inputs.environment == 'dev' && 40 || inputs.environment == 'sit' && 140 || 1040 }}
+      deploy_phase: ${{ inputs.deploy_phase }}
+      terraform_action: ${{ inputs.terraform_action }}
+    secrets:
+      AWS_REGION: ${{ inputs.environment == 'prod' && 'af-south-1' || 'eu-west-1' }}
+      AWS_ACCOUNT_ID: ${{ inputs.environment == 'dev' && '536580886816' || inputs.environment == 'sit' && '815856636111' || '093646564004' }}

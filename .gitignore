@@ -3,6 +3,7 @@
 
 # macOS
 .DS_Store
+._*
 
 # Terraform
 *.tfstate
@@ -18,4 +19,14 @@
 *.pem
 *.key
 credentials.json
+CREDENTIALS.md
 .env
+
+# Website content - actual tenant site files and databases (too large for git)
+2_bbws_agents/tenant/migrations/*/site/
+2_bbws_agents/tenant/migrations/*/database/
+2_bbws_agents/tenant/migrations/**/migration-artifacts/
+*.tar.gz
+*.wpress
+0_utilities/website_extractor/
+extracted_sites/

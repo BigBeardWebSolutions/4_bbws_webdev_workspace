@@ -1,0 +1,44 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Archives
+*.zip
+
+# Claude
+.claude/
+tenant/migrations/CREDENTIALS.md
+
+# Large migration files (exceed GitHub limits)
+tenant/migrations/GravitonWealth/database/gravitonp.sql
+tenant/migrations/GravitonWealth/site/gravitonwm/wp-content/uploads/2025/06/COFI-2.png
+tenant/migrations/GravitonWealth/site/gravitonwm/wp-content/uploads/2025/06/COFI-3.png
+tenant/migrations/OctagonFinancial/database/octagonfin.sql

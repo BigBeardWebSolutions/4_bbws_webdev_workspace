@@ -1,0 +1,17 @@
+# vdanutrition SIT Environment Configuration
+tenant_name     = "vdanutrition"
+environment     = "sit"
+domain_name     = "vdanutrition.wpsit.kimmyai.io"
+alb_priority    = 300
+aws_region      = "eu-west-1"
+aws_profile     = "sit"
+wordpress_image = "815856636111.dkr.ecr.eu-west-1.amazonaws.com/sit-wordpress:latest"
+task_cpu        = 256
+task_memory     = 512
+desired_count   = 1
+enable_ecs_exec = true
+wordpress_debug = false
+
+# SIT environment has multiple VPCs/SGs - specify the correct ones
+vpc_id            = "vpc-02ca0b5516152669d"
+security_group_id = "sg-01bca1fb9806ad397"

@@ -1,0 +1,623 @@
+openapi: 3.0.3
+info:
+  title: BBWS Tenant Management API
+  description: |
+    Core API for managing customer tenant organizations, hierarchy, user assignments,
+    and lifecycle states. This is the foundational service that all other BBWS APIs depend on.
+
+    **BRS Reference**: BRS 2.5
+    **HLD Reference**: 2.5_HLD_Tenant_Management.md
+  version: 1.0.0
+  contact:
+    name: BBWS Platform Team
+    email: platform@kimmyai.io
+
+servers:
+  - url: https://dev.api.kimmyai.io/v1.0
+    description: Development
+  - url: https://sit.api.kimmyai.io/v1.0
+    description: System Integration Testing
+  - url: https://api.kimmyai.io/v1.0
+    description: Production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Tenants
+    description: Tenant CRUD operations
+  - name: Divisions
+    description: Organization hierarchy - divisions
+  - name: Groups
+    description: Organization hierarchy - groups
+  - name: Teams
+    description: Organization hierarchy - teams
+  - name: Users
+    description: User assignment operations
+  - name: Invitations
+    description: User invitation management
+  - name: Lifecycle
+    description: Tenant lifecycle operations
+
+paths:
+  /tenants:
+    get:
+      tags: [Tenants]
+      summary: List all tenants
+      description: List all tenants with pagination. Platform Admin only.
+      operationId: listTenants
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/StartAt'
+        - $ref: '#/components/parameters/Status'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Tenants]
+      summary: Create new tenant
+      description: Create a new tenant organization. Platform Admin only.
+      operationId: createTenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+      responses:
+        '201':
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Organization name already exists
+
+  /tenants/{tenantId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    get:
+      tags: [Tenants]
+      summary: Get tenant details
+      operationId: getTenant
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [Tenants]
+      summary: Update tenant
+      operationId: updateTenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantRequest'
+      responses:
+        '200':
+          description: Tenant updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Tenants]
+      summary: Soft delete tenant
+      description: Marks tenant as DEPROVISIONED. Platform Admin only.
+      operationId: deleteTenant
+      responses:
+        '204':
+          description: Tenant deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenantId}/divisions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    get:
+      tags: [Divisions]
+      summary: List divisions
+      operationId: listDivisions
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/StartAt'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DivisionListResponse'
+
+    post:
+      tags: [Divisions]
+      summary: Create division
+      operationId: createDivision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDivisionRequest'
+      responses:
+        '201':
+          description: Division created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Division'
+
+  /tenants/{tenantId}/divisions/{divisionId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/DivisionId'
+
+    get:
+      tags: [Divisions]
+      summary: Get division
+      operationId: getDivision
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Division'
+
+    put:
+      tags: [Divisions]
+      summary: Update division
+      operationId: updateDivision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDivisionRequest'
+      responses:
+        '200':
+          description: Division updated
+
+    delete:
+      tags: [Divisions]
+      summary: Delete division
+      operationId: deleteDivision
+      responses:
+        '204':
+          description: Division deleted
+
+  /tenants/{tenantId}/divisions/{divisionId}/groups:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/DivisionId'
+
+    get:
+      tags: [Groups]
+      summary: List groups in division
+      operationId: listGroups
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupListResponse'
+
+    post:
+      tags: [Groups]
+      summary: Create group
+      operationId: createGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+      responses:
+        '201':
+          description: Group created
+
+  /tenants/{tenantId}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    get:
+      tags: [Invitations]
+      summary: List pending invitations
+      operationId: listInvitations
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationListResponse'
+
+    post:
+      tags: [Invitations]
+      summary: Create invitation
+      operationId: createInvitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInvitationRequest'
+      responses:
+        '201':
+          description: Invitation created
+
+  /tenants/{tenantId}/lifecycle/suspend:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Lifecycle]
+      summary: Suspend tenant
+      description: Suspend tenant (async operation)
+      operationId: suspendTenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuspendRequest'
+      responses:
+        '202':
+          description: Suspension initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/lifecycle/resume:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Lifecycle]
+      summary: Resume tenant
+      operationId: resumeTenant
+      responses:
+        '202':
+          description: Resume initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/lifecycle/park:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Lifecycle]
+      summary: Park tenant (long-term suspension)
+      operationId: parkTenant
+      responses:
+        '202':
+          description: Park initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /tenants/{tenantId}/lifecycle/unpark:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+
+    post:
+      tags: [Lifecycle]
+      summary: Unpark tenant
+      operationId: unparkTenant
+      responses:
+        '202':
+          description: Unpark initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^tenant-[a-f0-9-]{36}$'
+      description: Unique tenant identifier
+
+    DivisionId:
+      name: divisionId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique division identifier
+
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+      description: Number of items per page
+
+    StartAt:
+      name: startAt
+      in: query
+      schema:
+        type: string
+      description: Pagination cursor
+
+    Status:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [PENDING, ACTIVE, SUSPENDED, PARKED, DEPROVISIONED]
+      description: Filter by tenant status
+
+  schemas:
+    Tenant:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          example: tenant-123e4567-e89b-12d3-a456-426614174000
+        organisationName:
+          type: string
+          example: ACME Corporation
+        contactEmail:
+          type: string
+          format: email
+          example: admin@acme.com
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, SUSPENDED, PARKED, DEPROVISIONED]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        _links:
+          $ref: '#/components/schemas/HATEOASLinks'
+
+    TenantListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tenant'
+        nextToken:
+          type: string
+        count:
+          type: integer
+
+    CreateTenantRequest:
+      type: object
+      required:
+        - organisationName
+        - contactEmail
+      properties:
+        organisationName:
+          type: string
+          minLength: 2
+          maxLength: 100
+        contactEmail:
+          type: string
+          format: email
+        metadata:
+          type: object
+          additionalProperties: true
+
+    UpdateTenantRequest:
+      type: object
+      properties:
+        organisationName:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        metadata:
+          type: object
+
+    Division:
+      type: object
+      properties:
+        divisionId:
+          type: string
+        name:
+          type: string
+        tenantId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    DivisionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Division'
+        nextToken:
+          type: string
+
+    CreateDivisionRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+
+    UpdateDivisionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+
+    GroupListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+        nextToken:
+          type: string
+
+    CreateGroupRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+
+    InvitationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+        nextToken:
+          type: string
+
+    CreateInvitationRequest:
+      type: object
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [ADMIN, OPERATOR, VIEWER]
+        teamId:
+          type: string
+
+    SuspendRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 10
+
+    OperationResponse:
+      type: object
+      properties:
+        operationId:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, IN_PROGRESS, COMPLETED, FAILED]
+        message:
+          type: string
+
+    HATEOASLinks:
+      type: object
+      properties:
+        self:
+          type: object
+          properties:
+            href:
+              type: string
+        divisions:
+          type: object
+          properties:
+            href:
+              type: string
+        invitations:
+          type: object
+          properties:
+            href:
+              type: string
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

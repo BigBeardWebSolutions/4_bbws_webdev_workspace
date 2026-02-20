@@ -1,0 +1,347 @@
+name: CloudFront Deployment Pipeline - Dev
+
+on:
+  repository_dispatch:
+    types: [s3_upload_trigger]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate-and-deploy:
+    runs-on: ubuntu-latest
+    environment: Development
+    
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_ARTIFACT_BUCKET }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Extract event payload
+        id: payload
+        run: |
+          echo "folder_name=${{ github.event.client_payload.folder_name }}" >> $GITHUB_OUTPUT
+          echo "is_new_folder=${{ github.event.client_payload.is_new_folder }}" >> $GITHUB_OUTPUT
+          
+          echo "📦 Processing folder: ${{ github.event.client_payload.folder_name }}"
+          echo "🆕 Is new folder: ${{ github.event.client_payload.is_new_folder }}"
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: GitHubActions-Dev-${{ github.run_id }}
+      
+      - name: Verify AWS credentials
+        run: |
+          echo "🔐 Verifying AWS credentials..."
+          aws sts get-caller-identity
+          echo "✅ AWS credentials configured"
+          echo "📍 Region: ${{ env.AWS_REGION }}"
+          echo "🪣 Bucket: ${{ env.S3_BUCKET }}"
+      
+      - name: Download site from S3
+        run: |
+          mkdir -p ./temp-site
+          echo "📥 Downloading from s3://${{ env.S3_BUCKET }}/${{ steps.payload.outputs.folder_name }}/"
+          
+          aws s3 sync \
+            s3://${{ env.S3_BUCKET }}/${{ steps.payload.outputs.folder_name }}/ \
+            ./temp-site/ \
+            --exclude ".checksums.txt" \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Download complete"
+          echo "📁 Contents:"
+          ls -lah ./temp-site/
+      
+      - name: Validate folder structure
+        run: |
+          echo "🔍 Validating folder structure..."
+          
+          if [ ! -f "./temp-site/index.html" ]; then
+            echo "❌ Error: index.html not found in root"
+            exit 1
+          fi
+          
+          FILE_COUNT=$(find ./temp-site -type f | wc -l)
+          echo "📊 Total files: $FILE_COUNT"
+          
+          if [ $FILE_COUNT -eq 0 ]; then
+            echo "❌ Error: No files found"
+            exit 1
+          fi
+          
+          echo "✅ Folder structure valid"
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install validation tools
+        run: |
+          echo "📦 Installing validation tools..."
+          npm install -g html-validate@8.x
+          npm install -g @lhci/cli@0.13.x
+          echo "✅ Tools installed"
+      
+      - name: Validate HTML (W3C-style)
+        run: |
+          echo "🔍 Running HTML validation..."
+          
+          cat > .htmlvalidate.json << 'HTMLCONFIG'
+          {
+            "extends": ["html-validate:recommended"],
+            "rules": {
+              "no-trailing-whitespace": "off",
+              "void-style": "off",
+              "no-inline-style": "off",
+              "require-sri": "off"
+            }
+          }
+          HTMLCONFIG
+          
+          if ! html-validate "./temp-site/**/*.html"; then
+            echo "❌ HTML validation failed"
+            echo "Please fix HTML errors and re-upload"
+            exit 1
+          fi
+          
+          echo "✅ HTML validation passed"
+      
+      - name: Calculate checksums
+        id: checksums
+        run: |
+          echo "🔐 Calculating checksums..."
+          cd ./temp-site
+          find . -type f -exec sha256sum {} \; | sort -k 2 > ../checksums.txt
+          cd ..
+          
+          CHECKSUM_HASH=$(sha256sum checksums.txt | awk '{print $1}')
+          echo "checksum_hash=$CHECKSUM_HASH" >> $GITHUB_OUTPUT
+          
+          echo "✅ Checksums calculated"
+          echo "🔑 Hash: $CHECKSUM_HASH"
+          
+          echo "📋 File checksums (first 10):"
+          head -10 checksums.txt
+          
+          aws s3 cp checksums.txt \
+            s3://${{ env.S3_BUCKET }}/${{ steps.payload.outputs.folder_name }}/.checksums.txt \
+            --content-type "text/plain" \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Checksums stored in S3"
+      
+      - name: Setup Terraform
+        if: steps.payload.outputs.is_new_folder == 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+          terraform_wrapper: false
+      
+      - name: Create Terraform Workspace for Site
+        if: steps.payload.outputs.is_new_folder == 'true'
+        run: |
+          echo "📁 Creating Terraform workspace for site..."
+          
+          mkdir -p .terraform-sites/${{ steps.payload.outputs.folder_name }}
+          
+          cat > .terraform-sites/${{ steps.payload.outputs.folder_name }}/main.tf << 'TFMAIN'
+          terraform {
+            required_version = ">= 1.0"
+            
+            backend "s3" {
+              bucket         = "bigbeard-site-migrator-tf-state-dev"
+              key            = "sites/${{ steps.payload.outputs.folder_name }}/terraform.tfstate"
+              region         = "eu-west-1"
+              encrypt        = true
+              dynamodb_table = "bigbeard-site-migrator-tf-locks-dev"
+            }
+            
+            required_providers {
+              aws = {
+                source  = "hashicorp/aws"
+                version = "~> 5.0"
+              }
+            }
+          }
+          
+          provider "aws" {
+            region = "eu-west-1"
+          }
+          
+          module "cloudfront_site" {
+            source = "../../terraform/modules/cloudfront-site"
+            
+            site_name                   = "${{ steps.payload.outputs.folder_name }}"
+            environment                 = "dev"
+            s3_bucket_name              = "${{ env.S3_BUCKET }}"
+            s3_bucket_regional_domain   = "${{ env.S3_BUCKET }}.s3.eu-west-1.amazonaws.com"
+          }
+          
+          output "distribution_url" {
+            value = module.cloudfront_site.distribution_url
+          }
+          
+          output "distribution_id" {
+            value = module.cloudfront_site.distribution_id
+          }
+          
+          output "distribution_domain_name" {
+            value = module.cloudfront_site.distribution_domain_name
+          }
+          TFMAIN
+          
+          echo "✅ Terraform workspace created"
+      
+      - name: Terraform Init - CloudFront Site
+        if: steps.payload.outputs.is_new_folder == 'true'
+        working-directory: ./.terraform-sites/${{ steps.payload.outputs.folder_name }}
+        run: |
+          echo "🔧 Initializing Terraform..."
+          terraform init
+          echo "✅ Terraform initialized"
+      
+      - name: Create CloudFront Distribution
+        if: steps.payload.outputs.is_new_folder == 'true'
+        working-directory: ./.terraform-sites/${{ steps.payload.outputs.folder_name }}
+        run: |
+          echo "☁️ Creating CloudFront distribution..."
+          
+          terraform plan -out=tfplan
+          terraform apply -auto-approve tfplan
+          
+          CLOUDFRONT_URL=$(terraform output -raw distribution_url)
+          CLOUDFRONT_ID=$(terraform output -raw distribution_id)
+          CLOUDFRONT_DOMAIN=$(terraform output -raw distribution_domain_name)
+          
+          echo "cloudfront_url=$CLOUDFRONT_URL" >> $GITHUB_OUTPUT
+          echo "cloudfront_id=$CLOUDFRONT_ID" >> $GITHUB_OUTPUT
+          echo "cloudfront_domain=$CLOUDFRONT_DOMAIN" >> $GITHUB_OUTPUT
+          
+          echo "✅ CloudFront Distribution Created"
+          echo "🌐 Domain: $CLOUDFRONT_DOMAIN"
+          echo "🆔 Distribution ID: $CLOUDFRONT_ID"
+          echo "🔗 URL: $CLOUDFRONT_URL"
+        id: cloudfront
+      
+      - name: Wait for CloudFront deployment
+        if: steps.payload.outputs.is_new_folder == 'true'
+        run: |
+          echo "⏳ Waiting for CloudFront distribution to deploy..."
+          DISTRIBUTION_ID="${{ steps.cloudfront.outputs.cloudfront_id }}"
+          
+          MAX_ATTEMPTS=90
+          ATTEMPT=0
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            STATUS=$(aws cloudfront get-distribution \
+              --id $DISTRIBUTION_ID \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Distribution.Status' \
+              --output text)
+            
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "⏱️  Attempt $ATTEMPT/$MAX_ATTEMPTS - Status: $STATUS"
+            
+            if [ "$STATUS" == "Deployed" ]; then
+              echo "✅ CloudFront distribution deployed successfully"
+              break
+            fi
+            
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "⚠️  Warning: Distribution not fully deployed after 15 minutes"
+              echo "Continuing with accessibility tests..."
+            fi
+            
+            sleep 10
+          done
+      
+      - name: Run Lighthouse accessibility test
+        if: steps.payload.outputs.is_new_folder == 'true'
+        run: |
+          echo "🔍 Running Lighthouse accessibility test..."
+          CLOUDFRONT_URL="${{ steps.cloudfront.outputs.cloudfront_url }}"
+          
+          echo "🌐 Testing URL: $CLOUDFRONT_URL"
+          
+          # Wait for DNS propagation
+          sleep 30
+          
+          cat > lighthouserc.json << LHCONFIG
+          {
+            "ci": {
+              "collect": {
+                "url": ["$CLOUDFRONT_URL"],
+                "numberOfRuns": 1,
+                "settings": {
+                  "preset": "desktop",
+                  "throttling": {
+                    "rttMs": 40,
+                    "throughputKbps": 10240,
+                    "cpuSlowdownMultiplier": 1
+                  }
+                }
+              },
+              "assert": {
+                "assertions": {
+                  "categories:accessibility": ["warn", {"minScore": 0.9}],
+                  "categories:best-practices": ["warn", {"minScore": 0.8}],
+                  "categories:seo": ["warn", {"minScore": 0.8}]
+                }
+              }
+            }
+          }
+          LHCONFIG
+          
+          lhci autorun || {
+            echo "⚠️  Lighthouse test failed or scored below threshold"
+            echo "Review the site for accessibility improvements"
+            echo "Deployment will continue..."
+          }
+          
+          echo "✅ Lighthouse test completed"
+      
+      - name: Deployment Summary
+        run: |
+          echo ""
+          echo "========================================"
+          echo "🎉 DEPLOYMENT SUMMARY"
+          echo "========================================"
+          echo "📁 Folder: ${{ steps.payload.outputs.folder_name }}"
+          echo "🏷️  Environment: Development"
+          echo "🆕 New Folder: ${{ steps.payload.outputs.is_new_folder }}"
+          echo "🔐 Checksum: ${{ steps.checksums.outputs.checksum_hash }}"
+          echo "📍 Region: ${{ env.AWS_REGION }}"
+          echo "🪣 Bucket: ${{ env.S3_BUCKET }}"
+          echo ""
+          
+          if [ "${{ steps.payload.outputs.is_new_folder }}" == "true" ]; then
+            echo "☁️  CloudFront Distribution:"
+            echo "   🌐 Domain: ${{ steps.cloudfront.outputs.cloudfront_domain }}"
+            echo "   🆔 ID: ${{ steps.cloudfront.outputs.cloudfront_id }}"
+            echo "   🔗 URL: ${{ steps.cloudfront.outputs.cloudfront_url }}"
+          else
+            echo "♻️  Existing folder updated - no new distribution created"
+          fi
+          
+          echo "========================================"
+          echo "✅ Deployment completed successfully!"
+          echo "========================================"
+          echo ""
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Cleaning up temporary files..."
+          rm -rf ./temp-site
+          rm -f checksums.txt
+          rm -f lighthouserc.json
+          echo "✅ Cleanup complete"

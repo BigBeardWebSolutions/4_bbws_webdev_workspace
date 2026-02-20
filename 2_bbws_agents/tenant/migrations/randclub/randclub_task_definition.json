@@ -1,0 +1,85 @@
+{
+  "family": "sit-randclub",
+  "taskRoleArn": "arn:aws:iam::815856636111:role/sit-ecs-task-role",
+  "executionRoleArn": "arn:aws:iam::815856636111:role/sit-ecs-task-execution-role",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "wordpress",
+      "image": "815856636111.dkr.ecr.eu-west-1.amazonaws.com/sit-wordpress:latest",
+      "cpu": 0,
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "hostPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "WORDPRESS_DEBUG",
+          "value": "0"
+        },
+        {
+          "name": "WORDPRESS_DB_HOST",
+          "value": "sit-mysql.cn6qqe8eu6b9.eu-west-1.rds.amazonaws.com"
+        },
+        {
+          "name": "WORDPRESS_DB_NAME",
+          "value": "tenant_randclub_db"
+        },
+        {
+          "name": "WORDPRESS_CONFIG_EXTRA",
+          "value": "$_SERVER['HTTPS'] = 'on';\ndefine('FORCE_SSL_ADMIN', false);\ndefine('WP_HOME', 'https://randclub.wpsit.kimmyai.io');\ndefine('WP_SITEURL', 'https://randclub.wpsit.kimmyai.io');\ndefine('WP_ENVIRONMENT_TYPE', 'staging');"
+        },
+        {
+          "name": "WORDPRESS_TABLE_PREFIX",
+          "value": "wp_"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "WORDPRESS_DB_USER",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:815856636111:secret:sit-randclub-db-credentials-PCctyn:username::"
+        },
+        {
+          "name": "WORDPRESS_DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:815856636111:secret:sit-randclub-db-credentials-PCctyn:password::"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "wp-content",
+          "containerPath": "/var/www/html/wp-content",
+          "readOnly": false
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/sit",
+          "awslogs-region": "eu-west-1",
+          "awslogs-stream-prefix": "randclub"
+        }
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "wp-content",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-0be15624e203bf94a",
+        "rootDirectory": "/",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-009b7769d5e054cbb",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ]
+}
