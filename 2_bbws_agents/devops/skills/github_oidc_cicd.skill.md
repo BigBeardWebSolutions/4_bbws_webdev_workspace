@@ -118,7 +118,9 @@ cat > github-actions-trust-policy.json <<'EOF'
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:BigBeardWebSolutions/*"
+          "token.actions.githubusercontent.com:sub": [
+            "repo:BigBeardWebSolutions/2_1_bbws_dynamodb_schemas:*"
+          ]
         }
       }
     }
@@ -152,7 +154,7 @@ aws iam get-role \
 }
 ```
 
-**Pattern 2: Multiple Specific Repositories**
+**Pattern 2: Multiple Specific Repositories (Recommended)**
 ```json
 {
   "StringLike": {
@@ -165,7 +167,7 @@ aws iam get-role \
 }
 ```
 
-**Pattern 3: All Repositories in Organization (Recommended)**
+**Pattern 3: All Repositories in Organization — ❌ FORBIDDEN**
 ```json
 {
   "StringLike": {
@@ -174,17 +176,38 @@ aws iam get-role \
 }
 ```
 
+> **This pattern was labelled "(Recommended)" here until 2026-08-31, and that is
+> how DEF-PROD-042 and DEF-DEV-222 happened.** Corrected under DEF-PROD-042.
+>
+> The wildcard trusts **all 192 repositories in the organisation, on any
+> branch** — including repos created tomorrow, and branches opened by anyone
+> with write access to any one of them.
+>
+> On `bbws-github-actions-role-prod` it was paired with `iam:*` on
+> `role/bbws-*`, a pattern that matches the role's own name. Verified with
+> `simulate-principal-policy`: the role could call `PutRolePolicy` on **itself**
+> and attach `{"Action":"*","Resource":"*"}`. A push to any branch of any org
+> repo could therefore take full PROD admin in a single call.
+>
+> Use **Pattern 2**. It is a few more lines, and it is the only form that bounds
+> the blast radius. If that list looks uncomfortably long, that length *is* the
+> number of things which can currently deploy into the account.
+
 ### ⚠️ CRITICAL: Organization Name Must Match Exactly
 
 **Common Mistake:**
 ```json
-❌ "token.actions.githubusercontent.com:sub": "repo:tsekatm/*"
+❌ "token.actions.githubusercontent.com:sub": "repo:tsekatm/2_1_bbws_web_public:*"
 ```
 
 **Correct:**
 ```json
-✅ "token.actions.githubusercontent.com:sub": "repo:BigBeardWebSolutions/*"
+✅ "token.actions.githubusercontent.com:sub": "repo:BigBeardWebSolutions/2_1_bbws_web_public:*"
 ```
+
+> The examples above name a specific repository on purpose. They previously used
+> `repo:<org>/*`, which taught the forbidden wildcard while ostensibly making a
+> point about the organisation name (DEF-PROD-042).
 
 **Verification**: Check your repository URL on GitHub:
 ```
@@ -1303,12 +1326,15 @@ aws iam get-role \
   --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition.StringLike' \
   --profile AWSAdministratorAccess-536580886816
 
-# Should show:
+# Should show a SPECIFIC repository (or an explicit list of them):
 # {
-#     "token.actions.githubusercontent.com:sub": "repo:BigBeardWebSolutions/*"
+#     "token.actions.githubusercontent.com:sub": "repo:BigBeardWebSolutions/2_1_bbws_dynamodb_schemas:*"
 # }
+#
+# If it shows "repo:BigBeardWebSolutions/*", the role trusts every repo in the
+# org on any branch -- re-scope it (DEF-PROD-042).
 
-# If it shows wrong organization (e.g., "repo:tsekatm/*"), update it:
+# If it shows the wrong organization, or an org-wide wildcard, update it:
 aws iam update-assume-role-policy \
   --role-name github-actions-role-dev \
   --policy-document file://corrected-trust-policy.json \
@@ -1334,10 +1360,12 @@ aws iam get-role \
   --query 'Role.AssumeRolePolicyDocument' \
   --profile AWSAdministratorAccess-536580886816
 
-# Verify repository pattern matches:
-# "repo:BigBeardWebSolutions/2_1_bbws_dynamodb_schemas:*"  (specific repo)
-# OR
-# "repo:BigBeardWebSolutions/*"  (all repos in org)
+# Verify repository pattern matches a SPECIFIC repository, e.g.
+# "repo:BigBeardWebSolutions/2_1_bbws_dynamodb_schemas:*"
+#
+# If you see "repo:BigBeardWebSolutions/*" (all repos in org), that is a
+# FINDING, not a valid alternative -- it trusts all 192 org repos on any
+# branch. See DEF-PROD-042. Re-scope it with update-assume-role-policy.
 ```
 
 ### Error: "Failed to get existing workspaces" (Terraform S3 Backend)

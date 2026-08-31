@@ -1479,8 +1479,18 @@ resource "aws_iam_role" "github_actions" {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
+        # DEF-PROD-042: this read "repo:BigBeardWebSolutions/*:*" until
+        # 2026-08-31 — trusting all 192 org repos on any branch. On
+        # bbws-github-actions-role-prod that was paired with iam:* on
+        # role/bbws-*, a pattern matching the role's own name, so the role
+        # could PutRolePolicy on itself and become account admin. A push to
+        # any branch of any org repo could take PROD in one call.
+        #
+        # List the repositories that actually deploy this function.
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:BigBeardWebSolutions/*:*"
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:BigBeardWebSolutions/${var.repository_name}:*",
+          ]
         }
       }
     }]

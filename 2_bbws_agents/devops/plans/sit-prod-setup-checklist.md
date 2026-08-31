@@ -69,7 +69,9 @@ cat > github-actions-trust-policy-sit.json <<'EOF'
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:BigBeardWebSolutions/*"
+          "token.actions.githubusercontent.com:sub": [
+              "repo:BigBeardWebSolutions/<repo-that-deploys-this-stack>:*"
+            ]
         }
       }
     }
@@ -253,7 +255,9 @@ cat > github-actions-trust-policy-prod.json <<'EOF'
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:BigBeardWebSolutions/*"
+          "token.actions.githubusercontent.com:sub": [
+              "repo:BigBeardWebSolutions/<repo-that-deploys-this-stack>:*"
+            ]
         }
       }
     }
